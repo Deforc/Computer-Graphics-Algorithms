@@ -168,8 +168,13 @@ HRESULT InitDirectX(HWND hWnd)
 
     if (FAILED(CreateBuffers()))
     {
-        MessageBox(hWnd, L"Failed to create buffers.", L"Error", MB_OK);
-        return hr;
+        if (FAILED(hr)) {
+            MessageBox(hWnd, L"Failed to create buffers.", L"Error", MB_OK);
+            wchar_t error_message[256];
+            swprintf(error_message, 256, L"Error code: 0x%08X", hr);
+            MessageBox(hWnd, error_message, L"Error Code", MB_OK);
+            return hr;
+        }
     }
     return S_OK;
 }
