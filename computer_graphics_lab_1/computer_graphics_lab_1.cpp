@@ -301,19 +301,26 @@ HRESULT CreateShaders()
 HRESULT CreateConstantBuffers()
 {
     HRESULT hr = S_OK;
-    D3D11_BUFFER_DESC cbd = {};
-    cbd.Usage = D3D11_USAGE_DYNAMIC;
-    cbd.ByteWidth = sizeof(ConstantBufferData);
-    cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-    hr = g_pDevice->CreateBuffer(&cbd, nullptr, &g_pConstantBufferM);
+    D3D11_BUFFER_DESC cbdM = {};
+    cbdM.Usage = D3D11_USAGE_DYNAMIC;
+    cbdM.ByteWidth = sizeof(ConstantBufferData);
+    cbdM.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    cbdM.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+    hr = g_pDevice->CreateBuffer(&cbdM, nullptr, &g_pConstantBufferM);
     if (FAILED(hr))
     {
         return hr;
     }
 
-    hr = g_pDevice->CreateBuffer(&cbd, nullptr, &g_pConstantBufferVP);
+    D3D11_BUFFER_DESC cbdVP = {};
+    cbdVP.Usage = D3D11_USAGE_DEFAULT; 
+    cbdVP.ByteWidth = sizeof(ConstantBufferData);
+    cbdVP.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    cbdVP.CPUAccessFlags = 0;  
+
+    hr = g_pDevice->CreateBuffer(&cbdVP, nullptr, &g_pConstantBufferVP);
     if (FAILED(hr))
     {
         return hr;
@@ -415,7 +422,7 @@ void Render()
     UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferM, mBuffer.matrix);
     g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM);
 
-    UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferVP, vpBuffer.matrix);
+    g_pDeviceContext->UpdateSubresource(g_pConstantBufferVP, 0, nullptr, &vpBuffer, 0, 0);
     g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVP);
 
     g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
