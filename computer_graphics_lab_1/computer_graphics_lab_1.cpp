@@ -303,10 +303,10 @@ HRESULT CreateConstantBuffers()
     HRESULT hr = S_OK;
 
     D3D11_BUFFER_DESC cbdM = {};
-    cbdM.Usage = D3D11_USAGE_DYNAMIC;
+    cbdM.Usage = D3D11_USAGE_DEFAULT;
     cbdM.ByteWidth = sizeof(ConstantBufferData);
     cbdM.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    cbdM.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    cbdM.CPUAccessFlags = 0;
 
     hr = g_pDevice->CreateBuffer(&cbdM, nullptr, &g_pConstantBufferM);
     if (FAILED(hr))
@@ -315,10 +315,10 @@ HRESULT CreateConstantBuffers()
     }
 
     D3D11_BUFFER_DESC cbdVP = {};
-    cbdVP.Usage = D3D11_USAGE_DEFAULT; 
+    cbdVP.Usage = D3D11_USAGE_DYNAMIC;
     cbdVP.ByteWidth = sizeof(ConstantBufferData);
     cbdVP.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    cbdVP.CPUAccessFlags = 0;  
+    cbdVP.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
     hr = g_pDevice->CreateBuffer(&cbdVP, nullptr, &g_pConstantBufferVP);
     if (FAILED(hr))
@@ -333,7 +333,6 @@ HRESULT CreateBuffers()
 {
     HRESULT hr = S_OK;
 
-    // Создаём буфер вершин
     D3D11_BUFFER_DESC bufferDesc = {};
     bufferDesc.Usage = D3D11_USAGE_DEFAULT;
     bufferDesc.ByteWidth = sizeof(Vertices);
@@ -419,10 +418,10 @@ void Render()
         DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f)
     );
 
-    UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferM, mBuffer.matrix);
+    g_pDeviceContext->UpdateSubresource(g_pConstantBufferM, 0, nullptr, &mBuffer, 0, 0);
     g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM);
 
-    g_pDeviceContext->UpdateSubresource(g_pConstantBufferVP, 0, nullptr, &vpBuffer, 0, 0);
+    UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferVP, vpBuffer.matrix);
     g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVP);
 
     g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
