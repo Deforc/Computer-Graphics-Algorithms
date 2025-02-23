@@ -24,19 +24,57 @@ ID3D11Device* g_pDevice = nullptr;
 ID3D11DeviceContext* g_pDeviceContext = nullptr;
 ID3D11RenderTargetView* g_pRenderTargetView = nullptr;
 ID3D11Buffer* g_pVertexBuffer = nullptr;
+ID3D11Buffer* g_pIndexBuffer = nullptr;
+ID3D11Buffer* g_pConstantBufferM = nullptr;
+ID3D11Buffer* g_pConstantBufferVP = nullptr;
 ID3D11InputLayout* g_pInputLayout = nullptr;
 ID3D11VertexShader* g_pVertexShader = nullptr;
 ID3D11PixelShader* g_pPixelShader = nullptr;
+
+DirectX::XMFLOAT3 g_CameraPosition = { 0.0f, 0.0f, -5.0f };
+float g_RotationAngle = 0.0f;
+float g_RotationAngleX = 0.0f;
+float g_RotationAngleY = 0.0f;
+float g_CameraMoveSpeed = 15.0f;
+float g_CameraDistance = 5.0f;
+ULONGLONG g_timeStart = 0;
+float g_DeltaTime = 0.0f;
+
+
+POINT g_MousePos;
+bool g_MousePressed = false;
 
 struct Vertex {
     DirectX::XMFLOAT3 position;
     DirectX::XMFLOAT4 color;
 };
 
+struct ConstantBufferData
+{
+    DirectX::XMMATRIX matrix;
+};
+
+
 Vertex Vertices[] = {
-    { DirectX::XMFLOAT3(0.0f,  0.5f, 0.0f), DirectX::XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },  // Red
-    { DirectX::XMFLOAT3(0.5f, -0.5f, 0.0f), DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },  // Green
-    { DirectX::XMFLOAT3(-0.5f, -0.5f, 0.0f), DirectX::XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) }   // Blue
+    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f, 1.0f}}, 
+    {{-0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f, 1.0f}}, 
+    {{ 0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, 1.0f, 1.0f}}, 
+    {{ 0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f, 1.0f}}, 
+
+    {{-0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 1.0f, 1.0f}}, 
+    {{-0.5f,  0.5f,  0.5f}, {0.0f, 1.0f, 1.0f, 1.0f}}, 
+    {{ 0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f, 1.0f}}, 
+    {{ 0.5f, -0.5f,  0.5f}, {0.0f, 0.0f, 0.0f, 1.0f}}, 
+};
+
+
+UINT Indices[] = {
+    0, 1, 2,  0, 2, 3,
+    4, 6, 5,  4, 7, 6,
+    4, 5, 1,  4, 1, 0,
+    3, 2, 6,  3, 6, 7,
+    1, 5, 6,  1, 6, 2,
+    4, 0, 3,  4, 3, 7
 };
 
 ATOM MyRegisterClass(HINSTANCE hInstance);
@@ -49,6 +87,9 @@ HRESULT ResizeBuffers(UINT width, UINT height, HWND hWnd);
 HRESULT CompileShader(const wchar_t* filename, const char* entryPoint, const char* target, ID3DBlob** ppBlob);
 HRESULT CreateShaders();
 HRESULT CreateBuffers();
+HRESULT CreateConstantBuffers();
+void UpdateConstantBuffer(ID3D11DeviceContext* context, ID3D11Buffer* buffer, const DirectX::XMMATRIX& data);
+
 
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
@@ -166,6 +207,10 @@ HRESULT InitDirectX(HWND hWnd)
         return hr;
     }
 
+    if (FAILED(CreateConstantBuffers())) {
+        MessageBox(hWnd, L"Failed to create constant buffers.", L"Error", MB_OK);
+        return hr;
+    }
     if (FAILED(CreateBuffers()))
     {
         if (FAILED(hr)) {
@@ -176,6 +221,7 @@ HRESULT InitDirectX(HWND hWnd)
             return hr;
         }
     }
+    
     return S_OK;
 }
 
@@ -183,6 +229,9 @@ HRESULT InitDirectX(HWND hWnd)
 
 void CleanupDirectX()
 {
+    if (g_pIndexBuffer) g_pIndexBuffer->Release();
+    if (g_pConstantBufferM) g_pConstantBufferM->Release();
+    if (g_pConstantBufferVP) g_pConstantBufferVP->Release();
     if (g_pVertexBuffer) g_pVertexBuffer->Release();
     if (g_pInputLayout) g_pInputLayout->Release();
     if (g_pVertexShader) g_pVertexShader->Release();
@@ -191,6 +240,7 @@ void CleanupDirectX()
     if (g_pSwapChain) g_pSwapChain->Release();
     if (g_pDeviceContext) g_pDeviceContext->Release();
     if (g_pDevice) g_pDevice->Release();
+
 }
 
 HRESULT CompileShader(const wchar_t* filename, const char* entryPoint, const char* target, ID3DBlob** ppBlob)
@@ -248,8 +298,35 @@ HRESULT CreateShaders()
     return S_OK;
 }
 
+HRESULT CreateConstantBuffers()
+{
+    HRESULT hr = S_OK;
+    D3D11_BUFFER_DESC cbd = {};
+    cbd.Usage = D3D11_USAGE_DYNAMIC;
+    cbd.ByteWidth = sizeof(ConstantBufferData);
+    cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+    hr = g_pDevice->CreateBuffer(&cbd, nullptr, &g_pConstantBufferM);
+    if (FAILED(hr))
+    {
+        return hr;
+    }
+
+    hr = g_pDevice->CreateBuffer(&cbd, nullptr, &g_pConstantBufferVP);
+    if (FAILED(hr))
+    {
+        return hr;
+    }
+
+    return S_OK;
+}
+
 HRESULT CreateBuffers()
 {
+    HRESULT hr = S_OK;
+
+    // Создаём буфер вершин
     D3D11_BUFFER_DESC bufferDesc = {};
     bufferDesc.Usage = D3D11_USAGE_DEFAULT;
     bufferDesc.ByteWidth = sizeof(Vertices);
@@ -259,34 +336,132 @@ HRESULT CreateBuffers()
     D3D11_SUBRESOURCE_DATA initData = {};
     initData.pSysMem = Vertices;
 
-    HRESULT hr = g_pDevice->CreateBuffer(&bufferDesc, &initData, &g_pVertexBuffer);
+    hr = g_pDevice->CreateBuffer(&bufferDesc, &initData, &g_pVertexBuffer);
     if (FAILED(hr)) return hr;
+
+    bufferDesc.Usage = D3D11_USAGE_DEFAULT;
+    bufferDesc.ByteWidth = sizeof(Indices);
+    bufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    bufferDesc.CPUAccessFlags = 0;
+    initData.pSysMem = Indices;
+
+    hr = g_pDevice->CreateBuffer(&bufferDesc, &initData, &g_pIndexBuffer);
+    if (FAILED(hr)) return hr;
+
+    return S_OK;
+}
+
+void UpdateConstantBuffer(ID3D11DeviceContext* context, ID3D11Buffer* buffer, const DirectX::XMMATRIX& data)
+{
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    HRESULT hr = context->Map(buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
+    if (SUCCEEDED(hr))
+    {
+        memcpy(mappedResource.pData, &data, sizeof(DirectX::XMMATRIX));
+        context->Unmap(buffer, 0);
+    }
 }
 
 void Render()
 {
+    ULONGLONG timeCur = GetTickCount64();
+    if (g_timeStart == 0)
+        g_timeStart = timeCur;
+
+    g_DeltaTime = (timeCur - g_timeStart) / 1000.0f;
+    g_timeStart = timeCur;
+
+    if (g_DeltaTime > 0.1f) g_DeltaTime = 0.1f;
+
+    g_RotationAngle += 1.0f * g_DeltaTime;
+    if (g_RotationAngle > DirectX::XM_2PI) {
+        g_RotationAngle -= DirectX::XM_2PI;
+    }
+
     g_pDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
     g_pDeviceContext->ClearRenderTargetView(g_pRenderTargetView, DirectX::Colors::MidnightBlue);
 
     UINT stride = sizeof(Vertex);
     UINT offset = 0;
     g_pDeviceContext->IASetVertexBuffers(0, 1, &g_pVertexBuffer, &stride, &offset);
+    g_pDeviceContext->IASetIndexBuffer(g_pIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
     g_pDeviceContext->IASetInputLayout(g_pInputLayout);;
 
 
     g_pDeviceContext->VSSetShader(g_pVertexShader, nullptr, 0);
     g_pDeviceContext->PSSetShader(g_pPixelShader, nullptr, 0);
+
+    ConstantBufferData mBuffer;
+    ConstantBufferData vpBuffer;
+
+    mBuffer.matrix = DirectX::XMMatrixRotationY(g_RotationAngle);
+
+    DirectX::XMVECTOR eye = DirectX::XMVectorSet(
+        g_CameraDistance * sin(g_RotationAngleY),
+        g_CameraDistance * sin(g_RotationAngleX),
+        g_CameraDistance * cos(g_RotationAngleY),
+        1.0f
+    );
+
+    DirectX::XMVECTOR at = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
+    DirectX::XMVECTOR up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+
+    constexpr float fovAngleY = DirectX::XMConvertToRadians(60.0f);
+    vpBuffer.matrix = DirectX::XMMatrixMultiply(
+        DirectX::XMMatrixLookAtLH(eye, at, up),
+        DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f)
+    );
+
+    UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferM, mBuffer.matrix);
+    g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM);
+
+    UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferVP, vpBuffer.matrix);
+    g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVP);
+
     g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    g_pDeviceContext->Draw(3, 0);
+    g_pDeviceContext->DrawIndexed(36, 0, 0);
 
-    g_pSwapChain->Present(0, 0);
+    g_pSwapChain->Present(1, 0);
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
+    case WM_LBUTTONDOWN:
+        g_MousePressed = true;
+        SetCapture(hWnd);
+        GetCursorPos(&g_MousePos);
+        break;
+
+    case WM_LBUTTONUP:
+        g_MousePressed = false;
+        ReleaseCapture();
+        break;
+
+    case WM_MOUSEMOVE:
+        if (g_MousePressed)
+        {
+            POINT newMousePos;
+            GetCursorPos(&newMousePos);
+            float deltaX = static_cast<float>(newMousePos.x - g_MousePos.x);
+            float deltaY = static_cast<float>(newMousePos.y - g_MousePos.y);
+
+            g_RotationAngleY += deltaX * 0.01f; 
+            g_RotationAngleX += deltaY * 0.01f; 
+
+            g_MousePos = newMousePos;
+        }
+        break;
+    case WM_MOUSEWHEEL:
+    {
+        int wheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
+        g_CameraDistance += wheelDelta > 0 ? -1.0f : 1.0f;
+        g_CameraDistance = max(g_CameraDistance, 1.0f);
+        g_CameraDistance = max(g_CameraDistance, 1.0f);
+        break;
+    }
     case WM_SIZE:
         if (g_pSwapChain && g_pDevice) ResizeBuffers(LOWORD(lParam), HIWORD(lParam), hWnd);
         break;
