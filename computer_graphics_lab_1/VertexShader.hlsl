@@ -1,13 +1,13 @@
 struct VSInput
 {
     float3 pos : POSITION;
-    float4 color : COLOR;
+    float2 tex : TEXCOORD;
 };
 
 struct VSOutput
 {
     float4 pos : SV_Position;
-    float4 color : COLOR;
+    float2 tex : TEXCOORD;
 };
 
 cbuffer mBuffer : register(b0)
@@ -24,8 +24,8 @@ VSOutput VSMain(VSInput input)
 {
     VSOutput output;
     float4 WorldPos = float4(input.pos, 1.0f);
-    output.pos = mul(model, WorldPos);
+    output.pos = mul(WorldPos, model);
     output.pos = mul(vp, output.pos);
-    output.color = input.color;
+    output.tex = input.tex;
     return output;
 }
