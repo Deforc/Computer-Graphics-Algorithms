@@ -53,5 +53,14 @@
     <FxCompile Include="PixelShader.hlsl">
       <Filter>Исходные файлы</Filter>
     </FxCompile>
+    <FxCompile Include="SkyBoxVertexShader.hlsl">
+      <Filter>Исходные файлы</Filter>
+    </FxCompile>
+    <FxCompile Include="SkyBoxPixelShader.hlsl">
+      <Filter>Исходные файлы</Filter>
+    </FxCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
   </ItemGroup>
 </Project>

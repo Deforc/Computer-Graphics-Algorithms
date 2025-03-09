@@ -111,7 +111,11 @@
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)VertexShader.hlsl" "$(TargetDir)" /E /I /Y 
-xcopy "$(ProjectDir)PixelShader.hlsl" "$(TargetDir)" /E /I /Y</Command>
+xcopy "$(ProjectDir)PixelShader.hlsl" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)SkyBoxVertexShader.hlsl" "$(TargetDir)" /E /I /Y 
+xcopy "$(ProjectDir)SkyBoxPixelShader.hlsl" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)naggets2.dds" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)cubemap.dds" "$(TargetDir)" /E /I /Y</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -131,7 +135,11 @@ xcopy "$(ProjectDir)PixelShader.hlsl" "$(TargetDir)" /E /I /Y</Command>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)VertexShader.hlsl" "$(TargetDir)" /E /I /Y 
-xcopy "$(ProjectDir)PixelShader.hlsl" "$(TargetDir)" /E /I /Y</Command>
+xcopy "$(ProjectDir)PixelShader.hlsl" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)SkyBoxVertexShader.hlsl" "$(TargetDir)" /E /I /Y 
+xcopy "$(ProjectDir)SkyBoxPixelShader.hlsl" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)naggets2.dds" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)cubemap.dds" "$(TargetDir)" /E /I /Y</Command>
     </PostBuildEvent>
     <FxCompile>
       <ObjectFileOutput />
@@ -163,6 +171,26 @@ xcopy "$(ProjectDir)PixelShader.hlsl" "$(TargetDir)" /E /I /Y</Command>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
       <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">PSMain</EntryPointName>
     </FxCompile>
+    <FxCompile Include="SkyBoxPixelShader.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
+      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">PSMain</EntryPointName>
+      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">PSMain</EntryPointName>
+    </FxCompile>
+    <FxCompile Include="SkyBoxVertexShader.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Vertex</ShaderType>
+      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">VSMain</EntryPointName>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
+      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">VSMain</EntryPointName>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
+    </FxCompile>
     <FxCompile Include="VertexShader.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Vertex</ShaderType>
@@ -173,7 +201,19 @@ xcopy "$(ProjectDir)PixelShader.hlsl" "$(TargetDir)" /E /I /Y</Command>
       <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">VSMain</EntryPointName>
     </FxCompile>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
+    <Import Project="..\packages\directxtex_desktop_win10.2024.10.29.1\build\native\directxtex_desktop_win10.targets" Condition="Exists('..\packages\directxtex_desktop_win10.2024.10.29.1\build\native\directxtex_desktop_win10.targets')" />
+    <Import Project="..\packages\directxtk_desktop_win10.2024.10.29.1\build\native\directxtk_desktop_win10.targets" Condition="Exists('..\packages\directxtk_desktop_win10.2024.10.29.1\build\native\directxtk_desktop_win10.targets')" />
   </ImportGroup>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>Данный проект ссылается на пакеты NuGet, отсутствующие на этом компьютере. Используйте восстановление пакетов NuGet, чтобы скачать их.  Дополнительную информацию см. по адресу: http://go.microsoft.com/fwlink/?LinkID=322105. Отсутствует следующий файл: {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\packages\directxtex_desktop_win10.2024.10.29.1\build\native\directxtex_desktop_win10.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\directxtex_desktop_win10.2024.10.29.1\build\native\directxtex_desktop_win10.targets'))" />
+    <Error Condition="!Exists('..\packages\directxtk_desktop_win10.2024.10.29.1\build\native\directxtk_desktop_win10.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\directxtk_desktop_win10.2024.10.29.1\build\native\directxtk_desktop_win10.targets'))" />
+  </Target>
 </Project>
