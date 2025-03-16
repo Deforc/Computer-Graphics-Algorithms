@@ -24,7 +24,7 @@ VSOutput VSMain(VSInput input)
 {
     VSOutput output;
     float4 WorldPos = float4(input.pos, 1.0f);
-    output.pos = mul(WorldPos, model);
+    output.pos = mul(model, WorldPos);
     output.pos = mul(vp, output.pos);
     output.tex = input.tex;
     return output;
