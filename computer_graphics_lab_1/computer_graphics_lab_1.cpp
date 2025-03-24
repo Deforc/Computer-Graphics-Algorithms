@@ -30,6 +30,7 @@ ID3D11Buffer* g_pVertexBuffer = nullptr;
 ID3D11Buffer* g_pIndexBuffer = nullptr;
 ID3D11Buffer* g_pConstantBufferM = nullptr;
 ID3D11Buffer* g_pConstantBufferM2 = nullptr;
+ID3D11Buffer* g_pConstantBufferM3 = nullptr;
 ID3D11Buffer* g_pConstantBufferVP = nullptr;
 ID3D11InputLayout* g_pInputLayout = nullptr;
 ID3D11VertexShader* g_pVertexShader = nullptr;
@@ -62,6 +63,12 @@ ID3D11DepthStencilState* g_pDepthStencilStateForTransparent = nullptr;
 ID3D11BlendState* g_pBlendState = nullptr;
 ID3D11RasterizerState* g_pRasterizerState = nullptr;
 
+ID3D11Buffer* g_pLightBuffer = nullptr;
+ID3D11Buffer* g_pLightColorBuffer = nullptr;
+ID3D11PixelShader* g_pLightPixelShader = nullptr;
+ID3D11ShaderResourceView* g_pNormalMapSRV = nullptr;
+ID3D11Buffer* g_pLightVertexBuffer = nullptr;
+ID3D11Buffer* g_pLightIndexBuffer = nullptr;
 
 DirectX::XMFLOAT3 g_CameraPosition = { 0.0f, 0.0f, -5.0f };
 float g_RotationAngle = 0.0f;
@@ -72,18 +79,27 @@ float g_CameraDistance = 5.0f;
 ULONGLONG g_timeStart = 0;
 float g_DeltaTime = 0.0f;
 
+DirectX::XMFLOAT3 lightColor = DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f); 
+DirectX::XMFLOAT3 ambient = DirectX::XMFLOAT3(0.1f, 0.1f, 0.1f); 
 
 POINT g_MousePos;
 bool g_MousePressed = false;
 
 struct Vertex {
     DirectX::XMFLOAT3 position;
+    DirectX::XMFLOAT3 normal;
     DirectX::XMFLOAT2 texCoord;
 };
 
 struct ConstantBufferData
 {
     DirectX::XMMATRIX matrix;
+};
+
+struct CNBufferData
+{
+    DirectX::XMMATRIX model;
+    DirectX::XMMATRIX normal;
 };
 
 struct ColorBuffer {
@@ -101,44 +117,56 @@ struct VertexSkybox {
 
 struct VertexPlane {
     DirectX::XMFLOAT3 position;
+    DirectX::XMFLOAT3 normal;
+};
+
+struct alignas(16) LightBuffer {
+    DirectX::XMFLOAT3 lightPos;
+    float padding0; 
+    DirectX::XMFLOAT3 lightColor;
+    float padding1; 
+    DirectX::XMFLOAT3 ambient;
+    float padding2; 
+    DirectX::XMFLOAT3 cameraPosition;
+    float padding3; 
 };
 
 Vertex Vertices[] = {
 
-    { DirectX::XMFLOAT3(-0.5f, -0.5f,  0.5f), DirectX::XMFLOAT2(0.0f, 1.0f) },
-    { DirectX::XMFLOAT3(0.5f, -0.5f,  0.5f), DirectX::XMFLOAT2(1.0f, 1.0f) },
-    { DirectX::XMFLOAT3(0.5f, -0.5f, -0.5f), DirectX::XMFLOAT2(1.0f, 0.0f) },
-    { DirectX::XMFLOAT3(-0.5f, -0.5f, -0.5f), DirectX::XMFLOAT2(0.0f, 0.0f) },
+    { DirectX::XMFLOAT3(-0.5f, -0.5f,  0.5f), DirectX::XMFLOAT3(0.0f, -1.0f, 0.0f), DirectX::XMFLOAT2(0.0f, 1.0f) },
+    { DirectX::XMFLOAT3(0.5f, -0.5f,  0.5f), DirectX::XMFLOAT3(0.0f, -1.0f, 0.0f), DirectX::XMFLOAT2(1.0f, 1.0f) },
+    { DirectX::XMFLOAT3(0.5f, -0.5f, -0.5f), DirectX::XMFLOAT3(0.0f, -1.0f, 0.0f), DirectX::XMFLOAT2(1.0f, 0.0f) },
+    { DirectX::XMFLOAT3(-0.5f, -0.5f, -0.5f), DirectX::XMFLOAT3(0.0f, -1.0f, 0.0f), DirectX::XMFLOAT2(0.0f, 0.0f) },
 
     // Top face
-    { DirectX::XMFLOAT3(-0.5f,  0.5f, -0.5f), DirectX::XMFLOAT2(0.0f, 1.0f) },
-    { DirectX::XMFLOAT3(0.5f,  0.5f, -0.5f), DirectX::XMFLOAT2(1.0f, 1.0f) },
-    { DirectX::XMFLOAT3(0.5f,  0.5f,  0.5f), DirectX::XMFLOAT2(1.0f, 0.0f) },
-    { DirectX::XMFLOAT3(-0.5f,  0.5f,  0.5f), DirectX::XMFLOAT2(0.0f, 0.0f) },
+    { DirectX::XMFLOAT3(-0.5f,  0.5f, -0.5f), DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f), DirectX::XMFLOAT2(0.0f, 1.0f) },
+    { DirectX::XMFLOAT3(0.5f,  0.5f, -0.5f), DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f), DirectX::XMFLOAT2(1.0f, 1.0f) },
+    { DirectX::XMFLOAT3(0.5f,  0.5f,  0.5f), DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f), DirectX::XMFLOAT2(1.0f, 0.0f) },
+    { DirectX::XMFLOAT3(-0.5f,  0.5f,  0.5f), DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f), DirectX::XMFLOAT2(0.0f, 0.0f) },
 
     // Front face
-    { DirectX::XMFLOAT3(0.5f, -0.5f, -0.5f), DirectX::XMFLOAT2(0.0f, 1.0f) },
-    { DirectX::XMFLOAT3(0.5f, -0.5f,  0.5f), DirectX::XMFLOAT2(1.0f, 1.0f) },
-    { DirectX::XMFLOAT3(0.5f,  0.5f,  0.5f), DirectX::XMFLOAT2(1.0f, 0.0f) },
-    { DirectX::XMFLOAT3(0.5f,  0.5f, -0.5f), DirectX::XMFLOAT2(0.0f, 0.0f) },
+    { DirectX::XMFLOAT3(0.5f, -0.5f, -0.5f), DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f), DirectX::XMFLOAT2(0.0f, 1.0f) },
+    { DirectX::XMFLOAT3(0.5f, -0.5f,  0.5f), DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f), DirectX::XMFLOAT2(1.0f, 1.0f) },
+    { DirectX::XMFLOAT3(0.5f,  0.5f,  0.5f), DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f), DirectX::XMFLOAT2(1.0f, 0.0f) },
+    { DirectX::XMFLOAT3(0.5f,  0.5f, -0.5f), DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f), DirectX::XMFLOAT2(0.0f, 0.0f) },
 
     // Back face
-    { DirectX::XMFLOAT3(-0.5f, -0.5f,  0.5f), DirectX::XMFLOAT2(0.0f, 1.0f) },
-    { DirectX::XMFLOAT3(-0.5f, -0.5f, -0.5f), DirectX::XMFLOAT2(1.0f, 1.0f) },
-    { DirectX::XMFLOAT3(-0.5f,  0.5f, -0.5f), DirectX::XMFLOAT2(1.0f, 0.0f) },
-    { DirectX::XMFLOAT3(-0.5f,  0.5f,  0.5f), DirectX::XMFLOAT2(0.0f, 0.0f) },
+    { DirectX::XMFLOAT3(-0.5f, -0.5f,  0.5f), DirectX::XMFLOAT3(-1.0f, 0.0f, 0.0f), DirectX::XMFLOAT2(0.0f, 1.0f) },
+    { DirectX::XMFLOAT3(-0.5f, -0.5f, -0.5f), DirectX::XMFLOAT3(-1.0f, 0.0f, 0.0f), DirectX::XMFLOAT2(1.0f, 1.0f) },
+    { DirectX::XMFLOAT3(-0.5f,  0.5f, -0.5f), DirectX::XMFLOAT3(-1.0f, 0.0f, 0.0f), DirectX::XMFLOAT2(1.0f, 0.0f) },
+    { DirectX::XMFLOAT3(-0.5f,  0.5f,  0.5f), DirectX::XMFLOAT3(-1.0f, 0.0f, 0.0f), DirectX::XMFLOAT2(0.0f, 0.0f) },
 
     // Left face
-    { DirectX::XMFLOAT3(0.5f, -0.5f,  0.5f), DirectX::XMFLOAT2(0.0f, 1.0f) },
-    { DirectX::XMFLOAT3(-0.5f, -0.5f,  0.5f), DirectX::XMFLOAT2(1.0f, 1.0f) },
-    { DirectX::XMFLOAT3(-0.5f,  0.5f,  0.5f), DirectX::XMFLOAT2(1.0f, 0.0f) },
-    { DirectX::XMFLOAT3(0.5f,  0.5f,  0.5f), DirectX::XMFLOAT2(0.0f, 0.0f) },
+    { DirectX::XMFLOAT3(0.5f, -0.5f,  0.5f), DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f), DirectX::XMFLOAT2(0.0f, 1.0f) },
+    { DirectX::XMFLOAT3(-0.5f, -0.5f,  0.5f), DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f), DirectX::XMFLOAT2(1.0f, 1.0f) },
+    { DirectX::XMFLOAT3(-0.5f,  0.5f,  0.5f), DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f), DirectX::XMFLOAT2(1.0f, 0.0f) },
+    { DirectX::XMFLOAT3(0.5f,  0.5f,  0.5f), DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f), DirectX::XMFLOAT2(0.0f, 0.0f) },
 
     // Right face
-    { DirectX::XMFLOAT3(-0.5f, -0.5f, -0.5f), DirectX::XMFLOAT2(0.0f, 1.0f) },
-    { DirectX::XMFLOAT3(0.5f, -0.5f, -0.5f), DirectX::XMFLOAT2(1.0f, 1.0f) },
-    { DirectX::XMFLOAT3(0.5f,  0.5f, -0.5f), DirectX::XMFLOAT2(1.0f, 0.0f) },
-    { DirectX::XMFLOAT3(-0.5f,  0.5f, -0.5f), DirectX::XMFLOAT2(0.0f, 0.0f) }
+    { DirectX::XMFLOAT3(-0.5f, -0.5f, -0.5f), DirectX::XMFLOAT3(0.0f, 0.0f, -1.0f), DirectX::XMFLOAT2(0.0f, 1.0f) },
+    { DirectX::XMFLOAT3(0.5f, -0.5f, -0.5f), DirectX::XMFLOAT3(0.0f, 0.0f, -1.0f), DirectX::XMFLOAT2(1.0f, 1.0f) },
+    { DirectX::XMFLOAT3(0.5f,  0.5f, -0.5f), DirectX::XMFLOAT3(0.0f, 0.0f, -1.0f), DirectX::XMFLOAT2(1.0f, 0.0f) },
+    { DirectX::XMFLOAT3(-0.5f,  0.5f, -0.5f), DirectX::XMFLOAT3(0.0f, 0.0f, -1.0f), DirectX::XMFLOAT2(0.0f, 0.0f) }
 };
 
 VertexSkybox skyboxVertices[] = {
@@ -186,10 +214,10 @@ VertexSkybox skyboxVertices[] = {
 };
 
 VertexPlane planeVertices[] = {
-    { DirectX::XMFLOAT3(0.0f, -0.5f, 0.5f) },
-    { DirectX::XMFLOAT3(0.f, 0.5f, 0.5f) },
-    { DirectX::XMFLOAT3(0.0f, 0.5f, -0.5f) },
-    { DirectX::XMFLOAT3(0.0f, -0.5f, -0.5f) }
+{ DirectX::XMFLOAT3(0.0f, -0.5f, 0.5f), DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f) },
+    { DirectX::XMFLOAT3(0.0f, 0.5f, 0.5f), DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f) },
+    { DirectX::XMFLOAT3(0.0f, 0.5f, -0.5f), DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f) },
+    { DirectX::XMFLOAT3(0.0f, -0.5f, -0.5f), DirectX::XMFLOAT3(1.0f, 0.0f, .0f) }
 };
 
 
@@ -233,12 +261,15 @@ HRESULT CreateConstantBuffersPlane();
 HRESULT CreateConstantColorBuffer();
 void UpdateConstantBuffer(ID3D11DeviceContext* context, ID3D11Buffer* buffer, const DirectX::XMMATRIX& data);
 HRESULT LoadTexture(const wchar_t* filename);
+HRESULT LoadNormalMap(const wchar_t* filename);
 HRESULT CreateSampler();
 HRESULT LoadSkybox(const wchar_t* filename);
 HRESULT CreateDepthStencilBuffer();
 HRESULT CreateDepthStencilState();
 HRESULT CreateBlendState();
 HRESULT CreateRasterizerState();
+HRESULT CreateLightConstantBuffers();
+HRESULT CreateShadersLight();
 
 
 
@@ -373,7 +404,28 @@ HRESULT InitDirectX(HWND hWnd)
     viewport.TopLeftY = 0;
     g_pDeviceContext->RSSetViewports(1, &viewport);
 
+    if(FAILED(CreateShadersLight()))
+    {
+        MessageBox(hWnd, L"Failed to create light shaders.", L"Error", MB_OK);
+        return hr;
+    }
 
+    hr = CreateLightConstantBuffers();
+    if (FAILED(hr))
+    {
+        wchar_t errorMsg[256];
+        swprintf_s(errorMsg, L"Failed to create light constant buffers. HRESULT: 0x%08X", hr);
+        MessageBox(hWnd, errorMsg, L"Error", MB_OK);
+
+        if (hr == E_OUTOFMEMORY)
+            MessageBox(hWnd, L"Out of memory!", L"Error", MB_OK);
+        else if (hr == E_INVALIDARG)
+            MessageBox(hWnd, L"Invalid argument!", L"Error", MB_OK);
+        else if (hr == DXGI_ERROR_DEVICE_REMOVED)
+            MessageBox(hWnd, L"Device removed!", L"Error", MB_OK);
+        else if (hr == DXGI_ERROR_DEVICE_RESET)
+            MessageBox(hWnd, L"Device reset!", L"Error", MB_OK);
+    }
     if (FAILED(CreateShaders()))
     {
         MessageBox(hWnd, L"Failed to create shaders.", L"Error", MB_OK);
@@ -431,8 +483,13 @@ HRESULT InitDirectX(HWND hWnd)
         return hr;
     }
 
-    if (FAILED(LoadTexture(L"naggets2.dds"))) {
+    if (FAILED(LoadTexture(L"material.dds"))) {
         MessageBox(hWnd, L"Failed to load texture.", L"Error", MB_OK);
+        return hr;
+    }
+
+    if (FAILED(LoadNormalMap(L"materialNM.dds"))) {
+        MessageBox(hWnd, L"Failed to load normal map texture.", L"Error", MB_OK);
         return hr;
     }
 
@@ -457,6 +514,17 @@ HRESULT LoadTexture(const wchar_t* filename) {
     }
 
     hr = DirectX::CreateShaderResourceView(g_pDevice, image.GetImages(), image.GetImageCount(), image.GetMetadata(), &g_pTextureView);
+    return hr;
+}
+
+HRESULT LoadNormalMap(const wchar_t* filename) {
+    DirectX::ScratchImage image;
+    HRESULT hr = DirectX::LoadFromDDSFile(filename, DirectX::DDS_FLAGS_NONE, nullptr, image);
+    if (FAILED(hr)) {
+        return hr;
+    }
+
+    hr = DirectX::CreateShaderResourceView(g_pDevice, image.GetImages(), image.GetImageCount(), image.GetMetadata(), &g_pNormalMapSRV);
     return hr;
 }
 
@@ -502,6 +570,7 @@ void CleanupDirectX()
     if (g_pIndexBuffer) g_pIndexBuffer->Release();
     if (g_pConstantBufferM) g_pConstantBufferM->Release();
     if (g_pConstantBufferM2) g_pConstantBufferM2->Release();
+    if (g_pConstantBufferM3) g_pConstantBufferM3->Release();
     if (g_pConstantBufferVP) g_pConstantBufferVP->Release();
     if (g_pVertexBuffer) g_pVertexBuffer->Release();
     if (g_pInputLayout) g_pInputLayout->Release();
@@ -514,7 +583,6 @@ void CleanupDirectX()
     if (g_pSkyboxPixelShader) g_pSkyboxPixelShader->Release();
     if (g_pSkyboxVertexBuffer) g_pSkyboxVertexBuffer->Release();
     if (g_pSkyboxIndexBuffer) g_pSkyboxIndexBuffer->Release();
-    if (g_pRenderTargetView) g_pRenderTargetView->Release();
     if (g_pPlaneInputLayout) g_pPlaneInputLayout->Release();
     if (g_pPlanePixelShader) g_pPlanePixelShader->Release();
     if (g_pPlaneVertexShader) g_pPlaneVertexShader->Release();
@@ -525,6 +593,7 @@ void CleanupDirectX()
     if (g_pConstantColorBuffer) g_pConstantColorBuffer->Release();
     if (g_pCubemapView) g_pCubemapView->Release();
     if (g_pTextureView) g_pTextureView->Release();
+    if (g_pNormalMapSRV) g_pNormalMapSRV->Release();
     if (g_pSamplerState) g_pSamplerState->Release();
     if (g_pDepthStencilBuffer) g_pDepthStencilBuffer->Release();
     if (g_pDepthStencilView) g_pDepthStencilView->Release();
@@ -532,6 +601,12 @@ void CleanupDirectX()
     if (g_pDepthStencilStateForTransparent) g_pDepthStencilStateForTransparent->Release();
     if (g_pBlendState) g_pBlendState->Release();
     if (g_pRasterizerState) g_pRasterizerState->Release();
+
+    if (g_pLightBuffer) g_pLightBuffer->Release();
+    if (g_pLightColorBuffer) g_pLightColorBuffer->Release();
+    if (g_pLightPixelShader) g_pLightPixelShader->Release();
+
+    if (g_pRenderTargetView) g_pRenderTargetView->Release();
     if (g_pSwapChain) g_pSwapChain->Release();
     if (g_pDeviceContext) g_pDeviceContext->Release();
     if (g_pDevice) g_pDevice->Release();
@@ -573,7 +648,8 @@ HRESULT CreateShaders()
 
     D3D11_INPUT_ELEMENT_DESC layout[] = {
     { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-    { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+    { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
+    { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
     };
 
     hr = g_pDevice->CreateInputLayout(layout,
@@ -589,6 +665,21 @@ HRESULT CreateShaders()
     pPSBlob->Release();
     if (FAILED(hr)) return hr;
 
+    if (FAILED(hr)) return hr;
+
+    return S_OK;
+}
+
+HRESULT CreateShadersLight()
+{
+    HRESULT hr = S_OK;
+
+    ID3DBlob* pPSLightBlob = nullptr;
+    hr = CompileShader(L"PointLightPixelShader.hlsl", "PSMain", "ps_5_0", &pPSLightBlob);
+    if (FAILED(hr)) return hr;
+
+    hr = g_pDevice->CreatePixelShader(pPSLightBlob->GetBufferPointer(), pPSLightBlob->GetBufferSize(), nullptr, &g_pLightPixelShader);
+    pPSLightBlob->Release();
     if (FAILED(hr)) return hr;
 
     return S_OK;
@@ -637,7 +728,8 @@ HRESULT CreateShadersPlane() {
 
     D3D11_INPUT_ELEMENT_DESC PlaneLayout[] =
     {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
     };
 
     hr = g_pDevice->CreateInputLayout(PlaneLayout,
@@ -663,7 +755,7 @@ HRESULT CreateConstantBuffers()
 
     D3D11_BUFFER_DESC cbdM = {};
     cbdM.Usage = D3D11_USAGE_DEFAULT;
-    cbdM.ByteWidth = sizeof(ConstantBufferData);
+    cbdM.ByteWidth = sizeof(CNBufferData);
     cbdM.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     cbdM.CPUAccessFlags = 0;
 
@@ -674,6 +766,12 @@ HRESULT CreateConstantBuffers()
     }
 
     hr = g_pDevice->CreateBuffer(&cbdM, nullptr, &g_pConstantBufferM2);
+    if (FAILED(hr))
+    {
+        return hr;
+    }
+
+    hr = g_pDevice->CreateBuffer(&cbdM, nullptr, &g_pConstantBufferM3);
     if (FAILED(hr))
     {
         return hr;
@@ -724,7 +822,7 @@ HRESULT CreateConstantBuffersPlane()
 
     D3D11_BUFFER_DESC cbdM = {};
     cbdM.Usage = D3D11_USAGE_DEFAULT;
-    cbdM.ByteWidth = sizeof(ConstantBufferData);
+    cbdM.ByteWidth = sizeof(CNBufferData);
     cbdM.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     cbdM.CPUAccessFlags = 0;
 
@@ -766,6 +864,31 @@ HRESULT CreateConstantColorBuffer() {
 
     return S_OK;
 }
+
+HRESULT CreateLightConstantBuffers() 
+{
+    HRESULT hr = S_OK;
+
+    D3D11_BUFFER_DESC cbdLight = {};
+    cbdLight.Usage = D3D11_USAGE_DEFAULT;
+    cbdLight.ByteWidth = sizeof(DirectX::XMFLOAT4);
+    cbdLight.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    cbdLight.CPUAccessFlags = 0;
+    hr = g_pDevice->CreateBuffer(&cbdLight, nullptr, &g_pLightColorBuffer);
+    if (FAILED(hr))
+        return hr;
+
+    D3D11_BUFFER_DESC lightBufferDesc = {};
+    lightBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+    lightBufferDesc.ByteWidth = sizeof(LightBuffer);
+    lightBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    lightBufferDesc.CPUAccessFlags = 0;
+
+    hr = g_pDevice->CreateBuffer(&lightBufferDesc, nullptr, &g_pLightBuffer);
+    if (FAILED(hr))
+        return hr;
+}
+
 
 HRESULT CreateBuffers()
 {
@@ -1056,7 +1179,7 @@ void RenderPlanes() {
 
     for (const auto& obj : transparentObjects)
     {
-        ConstantBufferData mBufferPlane;
+        CNBufferData mBufferPlane;
         ConstantBufferData vpBufferPlane;
         ColorBuffer colbuf;
         colbuf.color = obj.color;
@@ -1076,7 +1199,10 @@ void RenderPlanes() {
             DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f)
         );
 
-        mBufferPlane.matrix = obj.modelMatrix;
+        mBufferPlane.model = obj.modelMatrix;
+        DirectX::XMMATRIX normalMatrix = DirectX::XMMatrixInverse(nullptr, obj.modelMatrix);
+        normalMatrix = DirectX::XMMatrixTranspose(normalMatrix);
+        mBufferPlane.normal = normalMatrix;
         g_pDeviceContext->UpdateSubresource(g_pConstantBufferMPlane, 0, nullptr, &mBufferPlane, 0, 0);
         g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferMPlane);
 
@@ -1090,6 +1216,37 @@ void RenderPlanes() {
 
     g_pDeviceContext->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
     g_pDeviceContext->OMSetDepthStencilState(nullptr, 0);
+}
+
+void RenderLightCube(DirectX::XMFLOAT3 lightPosition)
+{
+    LightBuffer lightData;
+    lightData.lightPos = lightPosition;
+    lightData.lightColor = lightColor;
+    lightData.ambient = DirectX::XMFLOAT3(0.1f, 0.1f, 0.1f);
+    lightData.cameraPosition = g_CameraPosition;
+    g_pDeviceContext->UpdateSubresource(g_pLightBuffer, 0, nullptr, &lightData, 0, 0);
+    UINT stride = sizeof(Vertex);
+    UINT offset = 0;
+    DirectX::XMMATRIX scale = DirectX::XMMatrixScaling(0.1f, 0.1f, 0.1f);
+    DirectX::XMMATRIX translation = DirectX::XMMatrixTranslation(lightPosition.x, lightPosition.y, lightPosition.z);
+    CNBufferData mBuffer3;
+    mBuffer3.model = scale * translation;
+    mBuffer3.normal = DirectX::XMMatrixInverse(nullptr, mBuffer3.model);
+    mBuffer3.normal = DirectX::XMMatrixTranspose(mBuffer3.normal);
+    g_pDeviceContext->UpdateSubresource(g_pConstantBufferM3, 0, nullptr, &mBuffer3, 0, 0);
+
+    g_pDeviceContext->IASetVertexBuffers(0, 1, &g_pVertexBuffer, &stride, &offset);
+    g_pDeviceContext->IASetIndexBuffer(g_pIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
+    g_pDeviceContext->IASetInputLayout(g_pInputLayout);
+
+    g_pDeviceContext->VSSetShader(g_pVertexShader, nullptr, 0);
+    g_pDeviceContext->PSSetShader(g_pLightPixelShader, nullptr, 0);
+
+    g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM3);
+    g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVP);
+
+    g_pDeviceContext->DrawIndexed(36, 0, 0);
 }
 
 void Render()
@@ -1124,12 +1281,15 @@ void Render()
 
     g_pDeviceContext->VSSetShader(g_pVertexShader, nullptr, 0);
     g_pDeviceContext->PSSetShader(g_pPixelShader, nullptr, 0);
+    g_pDeviceContext->PSSetConstantBuffers(0, 1, &g_pLightBuffer);
 
-    ConstantBufferData mBuffer;
-    ConstantBufferData mBuffer2;
+    CNBufferData mBuffer;
+    CNBufferData mBuffer2;
     ConstantBufferData vpBuffer;
 
-    mBuffer.matrix = DirectX::XMMatrixRotationY(g_RotationAngle);
+    mBuffer.model = DirectX::XMMatrixRotationY(g_RotationAngle);
+    mBuffer.normal = DirectX::XMMatrixInverse(nullptr, mBuffer.model);
+    mBuffer.normal = DirectX::XMMatrixTranspose(mBuffer.normal);
 
     DirectX::XMVECTOR eye = DirectX::XMVectorSet(
         g_CameraDistance * sin(g_RotationAngleY),
@@ -1154,18 +1314,24 @@ void Render()
     g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVP);
 
     g_pDeviceContext->PSSetShaderResources(0, 1, &g_pTextureView);
+    g_pDeviceContext->PSSetShaderResources(1, 1, &g_pNormalMapSRV);
     g_pDeviceContext->PSSetSamplers(0, 1, &g_pSamplerState);
 
     g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
     g_pDeviceContext->DrawIndexed(36, 0, 0);
 
-    mBuffer2.matrix = DirectX::XMMatrixTranslation(6.0f, 0.0f, 0.0f); 
+    mBuffer2.model = DirectX::XMMatrixTranslation(3.0f, 0.0f, 0.0f);
+    mBuffer2.normal = DirectX::XMMatrixInverse(nullptr, mBuffer2.model);
+    mBuffer2.normal = DirectX::XMMatrixTranspose(mBuffer2.normal);
     g_pDeviceContext->UpdateSubresource(g_pConstantBufferM2, 0, nullptr, &mBuffer2, 0, 0);
     g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM2);
 
     g_pDeviceContext->DrawIndexed(36, 0, 0);
 
+    DirectX::XMFLOAT3 lightPosition = DirectX::XMFLOAT3(4.0f, 0.0f, 0.0f);
+
+    RenderLightCube(DirectX::XMFLOAT3(2.3f, 0.55f, 0.0f));
     RenderPlanes();
 
     g_pSwapChain->Present(1, 0);

@@ -112,11 +112,14 @@
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)VertexShader.hlsl" "$(TargetDir)" /E /I /Y 
 xcopy "$(ProjectDir)PixelShader.hlsl" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)PointLightPixelShader.hlsl" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)SkyBoxVertexShader.hlsl" "$(TargetDir)" /E /I /Y 
 xcopy "$(ProjectDir)SkyBoxPixelShader.hlsl" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)PlaneVertexShader.hlsl" "$(TargetDir)" /E /I /Y 
 xcopy "$(ProjectDir)PlanePixelShader.hlsl" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)naggets2.dds" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)material.dds" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)materialNM.dds" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)cubemap.dds" "$(TargetDir)" /E /I /Y</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -138,11 +141,14 @@ xcopy "$(ProjectDir)cubemap.dds" "$(TargetDir)" /E /I /Y</Command>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)VertexShader.hlsl" "$(TargetDir)" /E /I /Y 
 xcopy "$(ProjectDir)PixelShader.hlsl" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)PointLightPixelShader.hlsl" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)SkyBoxVertexShader.hlsl" "$(TargetDir)" /E /I /Y 
 xcopy "$(ProjectDir)SkyBoxPixelShader.hlsl" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)PlaneVertexShader.hlsl" "$(TargetDir)" /E /I /Y 
 xcopy "$(ProjectDir)PlanePixelShader.hlsl" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)naggets2.dds" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)material.dds" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)materialNM.dds" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)cubemap.dds" "$(TargetDir)" /E /I /Y</Command>
     </PostBuildEvent>
     <FxCompile>
@@ -193,6 +199,16 @@ xcopy "$(ProjectDir)cubemap.dds" "$(TargetDir)" /E /I /Y</Command>
       <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">VSMain</EntryPointName>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
       <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">VSMain</EntryPointName>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
+    </FxCompile>
+    <FxCompile Include="PointLightPixelShader.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>
+      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">PSMain</EntryPointName>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
+      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">PSMain</EntryPointName>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
     </FxCompile>
     <FxCompile Include="SkyBoxPixelShader.hlsl">
