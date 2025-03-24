@@ -65,6 +65,9 @@
     <FxCompile Include="PlaneVertexShader.hlsl">
       <Filter>Исходные файлы</Filter>
     </FxCompile>
+    <FxCompile Include="PointLightPixelShader.hlsl">
+      <Filter>Исходные файлы</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
