@@ -11,6 +11,8 @@
 #include <cstdlib>
 #include <ctime>
 #include <imgui/imgui.h>
+#include <imgui/backends/imgui_impl_win32.h>
+#include <imgui/backends/imgui_impl_dx11.h>
 #ifdef _DEBUG
 #include <dxgidebug.h>
 #endif
@@ -18,6 +20,8 @@
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "dxguid.lib")
+
+extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 #define MAX_LOADSTRING 100
 
@@ -86,6 +90,7 @@ float g_CameraDistance = 5.0f;
 ULONGLONG g_timeStart = 0;
 float g_DeltaTime = 0.0f;
 
+DirectX::XMFLOAT3 g_lightPosition = { 2.5f, 0.6f, 0.0f };
 DirectX::XMFLOAT3 lightColor = DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f); 
 DirectX::XMFLOAT3 ambient = DirectX::XMFLOAT3(0.1f, 0.1f, 0.1f); 
 
@@ -110,12 +115,6 @@ struct CNBufferData
     DirectX::XMFLOAT4 isNormalMapActive[NUM_INSTANCES];
 };
 
-//struct CNBufferDataLightCube
-//{
-//    DirectX::XMMATRIX models[NUM_INSTANCES];
-//    DirectX::XMMATRIX normals[NUM_INSTANCES];
-//};
-
 struct ColorBuffer {
     DirectX::XMFLOAT4 color;
 };
@@ -132,6 +131,10 @@ struct VertexSkybox {
 struct VertexPlane {
     DirectX::XMFLOAT3 position;
     DirectX::XMFLOAT3 normal;
+};
+
+struct FrustumPlane {
+    float a, b, c, d;
 };
 
 struct alignas(16) LightBuffer {
@@ -289,6 +292,38 @@ HRESULT CreateLightConstantBuffers();
 HRESULT CreateShadersLight();
 
 
+void ExtractFrustumPlanes(const DirectX::XMMATRIX& M, FrustumPlane planes[6]) {
+    planes[0].a = M.r[0].m128_f32[3] + M.r[0].m128_f32[0];
+    planes[0].b = M.r[1].m128_f32[3] + M.r[1].m128_f32[0];
+    planes[0].c = M.r[2].m128_f32[3] + M.r[2].m128_f32[0];
+    planes[0].d = M.r[3].m128_f32[3] + M.r[3].m128_f32[0];
+
+    planes[1].a = M.r[0].m128_f32[3] - M.r[0].m128_f32[0];
+    planes[1].b = M.r[1].m128_f32[3] - M.r[1].m128_f32[0];
+    planes[1].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[0];
+    planes[1].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[0];
+
+    planes[2].a = M.r[0].m128_f32[3] - M.r[0].m128_f32[1];
+    planes[2].b = M.r[1].m128_f32[3] - M.r[1].m128_f32[1];
+    planes[2].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[1];
+    planes[2].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[1];
+
+    planes[3].a = M.r[0].m128_f32[3] + M.r[0].m128_f32[1];
+    planes[3].b = M.r[1].m128_f32[3] + M.r[1].m128_f32[1];
+    planes[3].c = M.r[2].m128_f32[3] + M.r[2].m128_f32[1];
+    planes[3].d = M.r[3].m128_f32[3] + M.r[3].m128_f32[1];
+
+    planes[4].a = M.r[0].m128_f32[2];
+    planes[4].b = M.r[1].m128_f32[2];
+    planes[4].c = M.r[2].m128_f32[2];
+    planes[4].d = M.r[3].m128_f32[2];
+
+    planes[5].a = M.r[0].m128_f32[3] - M.r[0].m128_f32[2];
+    planes[5].b = M.r[1].m128_f32[3] - M.r[1].m128_f32[2];
+    planes[5].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[2];
+    planes[5].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[2];
+}
+
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
@@ -421,6 +456,14 @@ HRESULT InitDirectX(HWND hWnd)
     viewport.TopLeftX = 0;
     viewport.TopLeftY = 0;
     g_pDeviceContext->RSSetViewports(1, &viewport);
+
+    //Инициализация ImGui
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    ImGui::StyleColorsDark();
+    ImGui_ImplWin32_Init(hWnd);
+    ImGui_ImplDX11_Init(g_pDevice, g_pDeviceContext);
 
     if(FAILED(CreateShadersLight()))
     {
@@ -614,6 +657,10 @@ HRESULT CreateSampler() {
 
 void CleanupDirectX()
 {
+    ImGui_ImplDX11_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+
     if (g_pIndexBuffer) g_pIndexBuffer->Release();
     if (g_pConstantBufferM) g_pConstantBufferM->Release();
     if (g_pConstantBufferM2) g_pConstantBufferM2->Release();
@@ -1317,6 +1364,23 @@ void Render()
     g_pDeviceContext->ClearRenderTargetView(g_pRenderTargetView, DirectX::Colors::MidnightBlue);
     g_pDeviceContext->ClearDepthStencilView(g_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
+    ImGui_ImplDX11_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+
+    ImGui::SetNextWindowSize(ImVec2(300, 125));
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+
+    ImGui::Begin("Light Controls");
+
+    ImGui::SliderFloat("Light X", &g_lightPosition.x, -10.0f, 10.0f);
+    ImGui::SliderFloat("Light Y", &g_lightPosition.y, -10.0f, 10.0f);
+    ImGui::SliderFloat("Light Z", &g_lightPosition.z, -10.0f, 10.0f);
+
+    ImGui::ColorEdit3("Light Color", reinterpret_cast<float*>(&lightColor));
+
+    ImGui::End();
+
     RenderSkyBox();
 
     g_pDeviceContext->OMSetDepthStencilState(g_pDepthStencilState, 1);
@@ -1384,16 +1448,20 @@ void Render()
 
     //g_pDeviceContext->DrawIndexed(36, 0, 0);
 
-    DirectX::XMFLOAT3 lightPosition = DirectX::XMFLOAT3(4.0f, 0.0f, 0.0f);
-
-    RenderLightCube(DirectX::XMFLOAT3(2.3f, 0.55f, 0.0f));
+    RenderLightCube(g_lightPosition);
     //RenderPlanes();
+
+    ImGui::Render();
+    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
     g_pSwapChain->Present(1, 0);
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
+        return true;
+
     switch (message)
     {
     case WM_LBUTTONDOWN:
@@ -1408,7 +1476,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
 
     case WM_MOUSEMOVE:
-        if (g_MousePressed)
+        if (!ImGui::GetIO().WantCaptureMouse && g_MousePressed)
         {
             POINT newMousePos;
             GetCursorPos(&newMousePos);
