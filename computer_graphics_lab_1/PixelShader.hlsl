@@ -1,5 +1,6 @@
-Texture2D g_Texture : register(t0);
-Texture2D normalMap : register(t1);
+Texture2D g_Texture: register(t0);
+Texture2D g_Texture_2 : register(t2);
+Texture2D g_NormalMap: register(t1);
 SamplerState g_Sampler : register(s0);
 
 cbuffer LightBuffer : register(b0)
@@ -20,6 +21,7 @@ struct VSOutput
     float3 WorldPos : TEXCOORD0;
     float3 Normal : TEXCOORD1;
     float2 TexCoord : TEXCOORD2;
+    nointerpolation uint texIndex : TEXCOORD3;
 };
 
 float3 ComputeTangent(float3 n)
@@ -29,23 +31,32 @@ float3 ComputeTangent(float3 n)
 
 float4 PSMain(VSOutput input) : SV_Target
 {
-    float4 diffuseColor = g_Texture.Sample(g_Sampler, input.TexCoord);
-    float3 normalSample = normalMap.Sample(g_Sampler, input.TexCoord).rgb * 2.0 - 1.0;
 
-    float3 tangent = ComputeTangent(normalize(input.Normal));
-    float3 bitangent = normalize(cross(normalize(input.Normal), tangent));
-    float3x3 TBN = float3x3(tangent, bitangent, normalize(input.Normal));
+    
+    float4 diffuseColor = g_Texture_2.Sample(g_Sampler, input.TexCoord);
 
-    float3 perturbedNormal = normalize(mul(normalSample, TBN));
+    
+    
+    float3 whichNormal = normalize(input.Normal);
+    if (input.texIndex % 2 == 1)
+    {   
+        diffuseColor = g_Texture.Sample(g_Sampler, input.TexCoord);
+        float3 normalSample = g_NormalMap.Sample(g_Sampler, input.TexCoord).rgb * 2.0 - 1.0;
+        float3 tangent = ComputeTangent(normalize(input.Normal));
+        float3 bitangent = normalize(cross(normalize(input.Normal), tangent));
+        float3x3 TBN = float3x3(tangent, bitangent, normalize(input.Normal));
+        whichNormal = normalize(mul(normalSample, TBN));
+    }
+    //float3 perturbedNormal = normalize(mul(normalSample, TBN));
 
     float3 lightDir = lightPos - input.WorldPos;
     float lightDirlength = length(lightDir);
     float attenuation = clamp(1 / (lightDirlength * lightDirlength), 0, 1);
 
     lightDir = normalize(lightDir);
-    float diff = saturate(dot(perturbedNormal, lightDir));
+    float diff = saturate(dot(whichNormal, lightDir));
     float3 viewDir = normalize(cameraPosition - input.WorldPos);
-    float3 reflectDir = reflect(-lightDir, perturbedNormal);
+    float3 reflectDir = reflect(-lightDir, whichNormal);
     float spec = pow(saturate(dot(viewDir, reflectDir)), 32);
 
     float3 ambientColor = ambient * diffuseColor.rgb;
@@ -55,7 +66,4 @@ float4 PSMain(VSOutput input) : SV_Target
     float3 finalColor = ambientColor + diffuseColorFinal + specularColor;
 
     return float4(finalColor, diffuseColor.a);
-
 }
-
-

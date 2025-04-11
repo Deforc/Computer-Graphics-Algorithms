@@ -8,6 +8,9 @@
 #include <DirectXTex.h>
 #include <DDSTextureLoader.h>
 #include <algorithm>
+#include <cstdlib>
+#include <ctime>
+#include <imgui/imgui.h>
 #ifdef _DEBUG
 #include <dxgidebug.h>
 #endif
@@ -17,6 +20,9 @@
 #pragma comment(lib, "dxguid.lib")
 
 #define MAX_LOADSTRING 100
+
+const int NUM_INSTANCES = 10;
+const int NUM_TEX = 2;
 
 HINSTANCE hInst;
 WCHAR szTitle[MAX_LOADSTRING];
@@ -36,6 +42,7 @@ ID3D11InputLayout* g_pInputLayout = nullptr;
 ID3D11VertexShader* g_pVertexShader = nullptr;
 ID3D11PixelShader* g_pPixelShader = nullptr;
 ID3D11ShaderResourceView* g_pTextureView = nullptr;
+ID3D11ShaderResourceView* g_pTextureView_naggets = nullptr;
 ID3D11SamplerState* g_pSamplerState = nullptr;
 
 ID3D11InputLayout* g_pSkyboxInputLayout = nullptr;
@@ -98,9 +105,16 @@ struct ConstantBufferData
 
 struct CNBufferData
 {
-    DirectX::XMMATRIX model;
-    DirectX::XMMATRIX normal;
+    DirectX::XMMATRIX models[NUM_INSTANCES];
+    DirectX::XMMATRIX normals[NUM_INSTANCES];
+    DirectX::XMFLOAT4 isNormalMapActive[NUM_INSTANCES];
 };
+
+//struct CNBufferDataLightCube
+//{
+//    DirectX::XMMATRIX models[NUM_INSTANCES];
+//    DirectX::XMMATRIX normals[NUM_INSTANCES];
+//};
 
 struct ColorBuffer {
     DirectX::XMFLOAT4 color;
@@ -241,6 +255,8 @@ DirectX::XMFLOAT4 g_ColorBuffers[2] = { DirectX::XMFLOAT4(1.0f, 0.0f, 0.0f, 0.5f
 DirectX::XMMATRIX g_modelMatrices[2] = { DirectX::XMMatrixTranslation(1.0f, 0.0f, 0.0f),
                                        DirectX::XMMatrixTranslation(1.5f, 0.0f, 0.0f) };
 
+CNBufferData g_mBuffers;
+
 ATOM MyRegisterClass(HINSTANCE hInstance);
 BOOL InitInstance(HINSTANCE, int);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -261,6 +277,7 @@ HRESULT CreateConstantBuffersPlane();
 HRESULT CreateConstantColorBuffer();
 void UpdateConstantBuffer(ID3D11DeviceContext* context, ID3D11Buffer* buffer, const DirectX::XMMATRIX& data);
 HRESULT LoadTexture(const wchar_t* filename);
+HRESULT LoadTexture_2(const wchar_t* filename);
 HRESULT LoadNormalMap(const wchar_t* filename);
 HRESULT CreateSampler();
 HRESULT LoadSkybox(const wchar_t* filename);
@@ -317,7 +334,8 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 }
 
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
-{
+{   
+    std::srand(static_cast<unsigned int>(std::time(nullptr)));
     hInst = hInstance;
     RECT rc = { 0, 0, 800, 600 };
     AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
@@ -447,6 +465,19 @@ HRESULT InitDirectX(HWND hWnd)
         }
     }
 
+    for (int i = 0; i < NUM_INSTANCES; i++) {
+        float randomX = static_cast<float>(std::rand() % 50) / 10.0f - 5.0f;
+        float randomY = static_cast<float>(std::rand() % 50) / 10.0f - 5.0f;
+        float randomZ = static_cast<float>(std::rand() % 50) / 10.0f - 5.0f;
+
+        DirectX::XMMATRIX translationMatrix = DirectX::XMMatrixTranslation(randomX, randomY, randomZ);
+
+        g_mBuffers.isNormalMapActive[i] = DirectX::XMFLOAT4(i % 2, i % 2, i % 2, i % 2);
+        g_mBuffers.models[i] = translationMatrix;
+        g_mBuffers.normals[i] = DirectX::XMMatrixInverse(nullptr, g_mBuffers.models[i]);
+        g_mBuffers.normals[i] = DirectX::XMMatrixTranspose(g_mBuffers.normals[i]);
+    }
+
     if (FAILED(CreateShadersSkyBox()))
     {
         MessageBox(hWnd, L"Failed to create shaders for skybox.", L"Error", MB_OK);
@@ -483,6 +514,11 @@ HRESULT InitDirectX(HWND hWnd)
         return hr;
     }
 
+    if (FAILED(LoadTexture_2(L"naggets2.dds"))) {
+        MessageBox(hWnd, L"Failed to load texture.", L"Error", MB_OK);
+        return hr;
+    }
+
     if (FAILED(LoadTexture(L"material.dds"))) {
         MessageBox(hWnd, L"Failed to load texture.", L"Error", MB_OK);
         return hr;
@@ -514,6 +550,17 @@ HRESULT LoadTexture(const wchar_t* filename) {
     }
 
     hr = DirectX::CreateShaderResourceView(g_pDevice, image.GetImages(), image.GetImageCount(), image.GetMetadata(), &g_pTextureView);
+    return hr;
+}
+
+HRESULT LoadTexture_2(const wchar_t* filename) {
+    DirectX::ScratchImage image;
+    HRESULT hr = DirectX::LoadFromDDSFile(filename, DirectX::DDS_FLAGS_NONE, nullptr, image);
+    if (FAILED(hr)) {
+        return hr;
+    }
+
+    hr = DirectX::CreateShaderResourceView(g_pDevice, image.GetImages(), image.GetImageCount(), image.GetMetadata(), &g_pTextureView_naggets);
     return hr;
 }
 
@@ -592,7 +639,8 @@ void CleanupDirectX()
     if (g_pConstantBufferVPPlane) g_pConstantBufferVPPlane->Release();
     if (g_pConstantColorBuffer) g_pConstantColorBuffer->Release();
     if (g_pCubemapView) g_pCubemapView->Release();
-    if (g_pTextureView) g_pTextureView->Release();
+    if (g_pTextureView) g_pTextureView->Release(); 
+    if (g_pTextureView_naggets) g_pTextureView_naggets->Release();
     if (g_pNormalMapSRV) g_pNormalMapSRV->Release();
     if (g_pSamplerState) g_pSamplerState->Release();
     if (g_pDepthStencilBuffer) g_pDepthStencilBuffer->Release();
@@ -1131,92 +1179,92 @@ void RenderSkyBox()
     g_pDeviceContext->Draw(36, 0);
 }
 
-void RenderPlanes() {
-    g_pDeviceContext->OMSetBlendState(g_pBlendState, nullptr, 0xffffffff);
-    g_pDeviceContext->OMSetDepthStencilState(g_pDepthStencilStateForTransparent, 1);
-    g_pDeviceContext->RSSetState(g_pRasterizerState);
-    UINT stride = sizeof(VertexPlane);
-    UINT offset = 0;
-    g_pDeviceContext->IASetVertexBuffers(0, 1, &g_pPlaneVertexBuffer, &stride, &offset);
-    g_pDeviceContext->IASetIndexBuffer(g_pPlaneIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
-    g_pDeviceContext->IASetInputLayout(g_pPlaneInputLayout);
-    g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-    g_pDeviceContext->VSSetShader(g_pPlaneVertexShader, nullptr, 0);
-    g_pDeviceContext->PSSetShader(g_pPlanePixelShader, nullptr, 0);
-
-    struct TransparentObject
-    {
-        DirectX::XMMATRIX modelMatrix;
-        DirectX::XMFLOAT4 color;
-        float distanceToCamera;
-    };
-
-    std::vector<TransparentObject> transparentObjects;
-
-    DirectX::XMVECTOR cameraPosition = DirectX::XMVectorSet(
-        g_CameraPosition.x, g_CameraPosition.y, g_CameraPosition.z, 1.0f
-    );
-
-    for (int i = 0; i < 2; ++i)
-    {
-        DirectX::XMVECTOR objPos = DirectX::XMVector3Transform(
-            DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),
-            g_modelMatrices[i]
-        );
-
-        DirectX::XMVECTOR diff = DirectX::XMVectorSubtract(objPos, cameraPosition);
-        float distance = DirectX::XMVectorGetX(DirectX::XMVector3Length(diff));
-
-        transparentObjects.push_back({ g_modelMatrices[i], g_ColorBuffers[i], distance});
-    }
-
-    std::sort(transparentObjects.begin(), transparentObjects.end(),
-        [](const TransparentObject& a, const TransparentObject& b)
-        {
-            return a.distanceToCamera > b.distanceToCamera;
-        });
-
-    for (const auto& obj : transparentObjects)
-    {
-        CNBufferData mBufferPlane;
-        ConstantBufferData vpBufferPlane;
-        ColorBuffer colbuf;
-        colbuf.color = obj.color;
-        DirectX::XMVECTOR eye = DirectX::XMVectorSet(
-            g_CameraDistance * sin(g_RotationAngleY),
-            g_CameraDistance * sin(g_RotationAngleX),
-            g_CameraDistance * cos(g_RotationAngleY),
-            1.0f
-        );
-
-        DirectX::XMVECTOR at = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
-        DirectX::XMVECTOR up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-
-        constexpr float fovAngleY = DirectX::XMConvertToRadians(60.0f);
-        vpBufferPlane.matrix = DirectX::XMMatrixMultiply(
-            DirectX::XMMatrixLookAtLH(eye, at, up),
-            DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f)
-        );
-
-        mBufferPlane.model = obj.modelMatrix;
-        DirectX::XMMATRIX normalMatrix = DirectX::XMMatrixInverse(nullptr, obj.modelMatrix);
-        normalMatrix = DirectX::XMMatrixTranspose(normalMatrix);
-        mBufferPlane.normal = normalMatrix;
-        g_pDeviceContext->UpdateSubresource(g_pConstantBufferMPlane, 0, nullptr, &mBufferPlane, 0, 0);
-        g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferMPlane);
-
-        UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferVPPlane, vpBufferPlane.matrix);
-        g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVPPlane);
-
-        g_pDeviceContext->UpdateSubresource(g_pConstantColorBuffer, 0, nullptr, &colbuf, 0, 0);
-        g_pDeviceContext->VSSetConstantBuffers(2, 1, &g_pConstantColorBuffer);
-        g_pDeviceContext->DrawIndexed(6, 0, 0);
-    }
-
-    g_pDeviceContext->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
-    g_pDeviceContext->OMSetDepthStencilState(nullptr, 0);
-}
+//void RenderPlanes() {
+//    g_pDeviceContext->OMSetBlendState(g_pBlendState, nullptr, 0xffffffff);
+//    g_pDeviceContext->OMSetDepthStencilState(g_pDepthStencilStateForTransparent, 1);
+//    g_pDeviceContext->RSSetState(g_pRasterizerState);
+//    UINT stride = sizeof(VertexPlane);
+//    UINT offset = 0;
+//    g_pDeviceContext->IASetVertexBuffers(0, 1, &g_pPlaneVertexBuffer, &stride, &offset);
+//    g_pDeviceContext->IASetIndexBuffer(g_pPlaneIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
+//    g_pDeviceContext->IASetInputLayout(g_pPlaneInputLayout);
+//    g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+//
+//    g_pDeviceContext->VSSetShader(g_pPlaneVertexShader, nullptr, 0);
+//    g_pDeviceContext->PSSetShader(g_pPlanePixelShader, nullptr, 0);
+//
+//    struct TransparentObject
+//    {
+//        DirectX::XMMATRIX modelMatrix;
+//        DirectX::XMFLOAT4 color;
+//        float distanceToCamera;
+//    };
+//
+//    std::vector<TransparentObject> transparentObjects;
+//
+//    DirectX::XMVECTOR cameraPosition = DirectX::XMVectorSet(
+//        g_CameraPosition.x, g_CameraPosition.y, g_CameraPosition.z, 1.0f
+//    );
+//
+//    for (int i = 0; i < 2; ++i)
+//    {
+//        DirectX::XMVECTOR objPos = DirectX::XMVector3Transform(
+//            DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),
+//            g_modelMatrices[i]
+//        );
+//
+//        DirectX::XMVECTOR diff = DirectX::XMVectorSubtract(objPos, cameraPosition);
+//        float distance = DirectX::XMVectorGetX(DirectX::XMVector3Length(diff));
+//
+//        transparentObjects.push_back({ g_modelMatrices[i], g_ColorBuffers[i], distance});
+//    }
+//
+//    std::sort(transparentObjects.begin(), transparentObjects.end(),
+//        [](const TransparentObject& a, const TransparentObject& b)
+//        {
+//            return a.distanceToCamera > b.distanceToCamera;
+//        });
+//
+//    for (const auto& obj : transparentObjects)
+//    {
+//        CNBufferData mBufferPlane;
+//        ConstantBufferData vpBufferPlane;
+//        ColorBuffer colbuf;
+//        colbuf.color = obj.color;
+//        DirectX::XMVECTOR eye = DirectX::XMVectorSet(
+//            g_CameraDistance * sin(g_RotationAngleY),
+//            g_CameraDistance * sin(g_RotationAngleX),
+//            g_CameraDistance * cos(g_RotationAngleY),
+//            1.0f
+//        );
+//
+//        DirectX::XMVECTOR at = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
+//        DirectX::XMVECTOR up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+//
+//        constexpr float fovAngleY = DirectX::XMConvertToRadians(60.0f);
+//        vpBufferPlane.matrix = DirectX::XMMatrixMultiply(
+//            DirectX::XMMatrixLookAtLH(eye, at, up),
+//            DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f)
+//        );
+//
+//        mBufferPlane.model = obj.modelMatrix;
+//        DirectX::XMMATRIX normalMatrix = DirectX::XMMatrixInverse(nullptr, obj.modelMatrix);
+//        normalMatrix = DirectX::XMMatrixTranspose(normalMatrix);
+//        mBufferPlane.normal = normalMatrix;
+//        g_pDeviceContext->UpdateSubresource(g_pConstantBufferMPlane, 0, nullptr, &mBufferPlane, 0, 0);
+//        g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferMPlane);
+//
+//        UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferVPPlane, vpBufferPlane.matrix);
+//        g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVPPlane);
+//
+//        g_pDeviceContext->UpdateSubresource(g_pConstantColorBuffer, 0, nullptr, &colbuf, 0, 0);
+//        g_pDeviceContext->VSSetConstantBuffers(2, 1, &g_pConstantColorBuffer);
+//        g_pDeviceContext->DrawIndexed(6, 0, 0);
+//    }
+//
+//    g_pDeviceContext->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
+//    g_pDeviceContext->OMSetDepthStencilState(nullptr, 0);
+//}
 
 void RenderLightCube(DirectX::XMFLOAT3 lightPosition)
 {
@@ -1231,9 +1279,9 @@ void RenderLightCube(DirectX::XMFLOAT3 lightPosition)
     DirectX::XMMATRIX scale = DirectX::XMMatrixScaling(0.1f, 0.1f, 0.1f);
     DirectX::XMMATRIX translation = DirectX::XMMatrixTranslation(lightPosition.x, lightPosition.y, lightPosition.z);
     CNBufferData mBuffer3;
-    mBuffer3.model = scale * translation;
-    mBuffer3.normal = DirectX::XMMatrixInverse(nullptr, mBuffer3.model);
-    mBuffer3.normal = DirectX::XMMatrixTranspose(mBuffer3.normal);
+    mBuffer3.models[0] = scale * translation;
+    mBuffer3.normals[0] = DirectX::XMMatrixInverse(nullptr, mBuffer3.models[0]);
+    mBuffer3.normals[0] = DirectX::XMMatrixTranspose(mBuffer3.normals[0]);
     g_pDeviceContext->UpdateSubresource(g_pConstantBufferM3, 0, nullptr, &mBuffer3, 0, 0);
 
     g_pDeviceContext->IASetVertexBuffers(0, 1, &g_pVertexBuffer, &stride, &offset);
@@ -1246,7 +1294,7 @@ void RenderLightCube(DirectX::XMFLOAT3 lightPosition)
     g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM3);
     g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVP);
 
-    g_pDeviceContext->DrawIndexed(36, 0, 0);
+    g_pDeviceContext->DrawIndexedInstanced(36,1, 0, 0, 0);
 }
 
 void Render()
@@ -1283,13 +1331,19 @@ void Render()
     g_pDeviceContext->PSSetShader(g_pPixelShader, nullptr, 0);
     g_pDeviceContext->PSSetConstantBuffers(0, 1, &g_pLightBuffer);
 
-    CNBufferData mBuffer;
-    CNBufferData mBuffer2;
+    CNBufferData mBuffers; // rotating cubes
+//    CNBufferData mBuffers2; // static cubes
     ConstantBufferData vpBuffer;
 
-    mBuffer.model = DirectX::XMMatrixRotationY(g_RotationAngle);
-    mBuffer.normal = DirectX::XMMatrixInverse(nullptr, mBuffer.model);
-    mBuffer.normal = DirectX::XMMatrixTranspose(mBuffer.normal);
+    for (int i = 0; i < NUM_INSTANCES; i++) {
+        if(i % 2 != 0)
+        g_mBuffers.models[i] = DirectX::XMMatrixRotationY(g_RotationAngle / 1000.0f) * g_mBuffers.models[i];
+        g_mBuffers.normals[i] = DirectX::XMMatrixInverse(nullptr, g_mBuffers.models[i]);
+        g_mBuffers.normals[i] = DirectX::XMMatrixTranspose(g_mBuffers.normals[i]);
+    }
+    //mBuffers.models = DirectX::XMMatrixRotationY(g_RotationAngle);
+    //mBuffer.normal = DirectX::XMMatrixInverse(nullptr, mBuffer.model);
+    //mBuffer.normal = DirectX::XMMatrixTranspose(mBuffer.normal);
 
     DirectX::XMVECTOR eye = DirectX::XMVectorSet(
         g_CameraDistance * sin(g_RotationAngleY),
@@ -1307,32 +1361,33 @@ void Render()
         DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f)
     );
 
-    g_pDeviceContext->UpdateSubresource(g_pConstantBufferM, 0, nullptr, &mBuffer, 0, 0);
+    g_pDeviceContext->UpdateSubresource(g_pConstantBufferM, 0, nullptr, &g_mBuffers, 0, 0);
     g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM);
 
     UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferVP, vpBuffer.matrix);
     g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVP);
 
     g_pDeviceContext->PSSetShaderResources(0, 1, &g_pTextureView);
+    g_pDeviceContext->PSSetShaderResources(2, 1, &g_pTextureView_naggets);
     g_pDeviceContext->PSSetShaderResources(1, 1, &g_pNormalMapSRV);
     g_pDeviceContext->PSSetSamplers(0, 1, &g_pSamplerState);
 
     g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    g_pDeviceContext->DrawIndexed(36, 0, 0);
+    g_pDeviceContext->DrawIndexedInstanced(36, NUM_INSTANCES, 0, 0, 0);
 
-    mBuffer2.model = DirectX::XMMatrixTranslation(3.0f, 0.0f, 0.0f);
-    mBuffer2.normal = DirectX::XMMatrixInverse(nullptr, mBuffer2.model);
-    mBuffer2.normal = DirectX::XMMatrixTranspose(mBuffer2.normal);
-    g_pDeviceContext->UpdateSubresource(g_pConstantBufferM2, 0, nullptr, &mBuffer2, 0, 0);
-    g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM2);
+    //mBuffer2.model = DirectX::XMMatrixTranslation(3.0f, 0.0f, 0.0f);
+    //mBuffer2.normal = DirectX::XMMatrixInverse(nullptr, mBuffer2.model);
+    //mBuffer2.normal = DirectX::XMMatrixTranspose(mBuffer2.normal);
+    //g_pDeviceContext->UpdateSubresource(g_pConstantBufferM2, 0, nullptr, &mBuffer2, 0, 0);
+    //g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM2);
 
-    g_pDeviceContext->DrawIndexed(36, 0, 0);
+    //g_pDeviceContext->DrawIndexed(36, 0, 0);
 
     DirectX::XMFLOAT3 lightPosition = DirectX::XMFLOAT3(4.0f, 0.0f, 0.0f);
 
     RenderLightCube(DirectX::XMFLOAT3(2.3f, 0.55f, 0.0f));
-    RenderPlanes();
+    //RenderPlanes();
 
     g_pSwapChain->Present(1, 0);
 }
