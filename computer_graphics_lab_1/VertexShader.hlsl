@@ -37,6 +37,6 @@ VSOutput VSMain(VSInput input, uint instanceID : SV_InstanceID)
     output.worldPos = WorldPos.xyz;
     output.normal = mul((float3x3) normals[instanceID], input.normal);
     output.tex = input.tex;
-    output.texIndex = instanceID % NUM_INSTANCES;
+    output.texIndex = isNormalMapActive[instanceID];
     return output;
 }

@@ -7,6 +7,8 @@
 #include <DirectXColors.h>
 #include <DirectXTex.h>
 #include <DDSTextureLoader.h>
+#include <array>
+#include <cmath>
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
@@ -101,6 +103,11 @@ struct Vertex {
     DirectX::XMFLOAT3 position;
     DirectX::XMFLOAT3 normal;
     DirectX::XMFLOAT2 texCoord;
+};
+
+struct AABB {
+    DirectX::XMFLOAT3 min;
+    DirectX::XMFLOAT3 max;
 };
 
 struct ConstantBufferData
@@ -291,39 +298,104 @@ HRESULT CreateRasterizerState();
 HRESULT CreateLightConstantBuffers();
 HRESULT CreateShadersLight();
 
+std::array<FrustumPlane, 6> ExtractFrustumPlanes(const DirectX::XMMATRIX& viewProjMatrix) {
+    std::array<FrustumPlane, 6> planes;
 
-void ExtractFrustumPlanes(const DirectX::XMMATRIX& M, FrustumPlane planes[6]) {
-    planes[0].a = M.r[0].m128_f32[3] + M.r[0].m128_f32[0];
-    planes[0].b = M.r[1].m128_f32[3] + M.r[1].m128_f32[0];
-    planes[0].c = M.r[2].m128_f32[3] + M.r[2].m128_f32[0];
-    planes[0].d = M.r[3].m128_f32[3] + M.r[3].m128_f32[0];
+    DirectX::XMFLOAT4X4 matrix;
+    DirectX::XMStoreFloat4x4(&matrix, viewProjMatrix);
 
-    planes[1].a = M.r[0].m128_f32[3] - M.r[0].m128_f32[0];
-    planes[1].b = M.r[1].m128_f32[3] - M.r[1].m128_f32[0];
-    planes[1].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[0];
-    planes[1].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[0];
+    // Near plane
+    planes[0] = { matrix._13, matrix._23, matrix._33, matrix._43 };
+    // Far plane
+    planes[1] = { matrix._14 - matrix._13, matrix._24 - matrix._23, matrix._34 - matrix._33, matrix._44 - matrix._43 };
+    // Left plane
+    planes[2] = { matrix._14 + matrix._11, matrix._24 + matrix._21, matrix._34 + matrix._31, matrix._44 + matrix._41 };
+    // Right plane
+    planes[3] = { matrix._14 - matrix._11, matrix._24 - matrix._21, matrix._34 - matrix._31, matrix._44 - matrix._41 };
+    // Top plane
+    planes[4] = { matrix._14 - matrix._12, matrix._24 - matrix._22, matrix._34 - matrix._32, matrix._44 - matrix._42 };
+    // Bottom plane
+    planes[5] = { matrix._14 + matrix._12, matrix._24 + matrix._22, matrix._34 + matrix._32, matrix._44 + matrix._42 };
 
-    planes[2].a = M.r[0].m128_f32[3] - M.r[0].m128_f32[1];
-    planes[2].b = M.r[1].m128_f32[3] - M.r[1].m128_f32[1];
-    planes[2].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[1];
-    planes[2].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[1];
+    for (auto& plane : planes) {
+        float length = sqrt(plane.a * plane.a + plane.b * plane.b + plane.c * plane.c);
+        plane.a /= length;
+        plane.b /= length;
+        plane.c /= length;
+        plane.d /= length;
+    }
 
-    planes[3].a = M.r[0].m128_f32[3] + M.r[0].m128_f32[1];
-    planes[3].b = M.r[1].m128_f32[3] + M.r[1].m128_f32[1];
-    planes[3].c = M.r[2].m128_f32[3] + M.r[2].m128_f32[1];
-    planes[3].d = M.r[3].m128_f32[3] + M.r[3].m128_f32[1];
-
-    planes[4].a = M.r[0].m128_f32[2];
-    planes[4].b = M.r[1].m128_f32[2];
-    planes[4].c = M.r[2].m128_f32[2];
-    planes[4].d = M.r[3].m128_f32[2];
-
-    planes[5].a = M.r[0].m128_f32[3] - M.r[0].m128_f32[2];
-    planes[5].b = M.r[1].m128_f32[3] - M.r[1].m128_f32[2];
-    planes[5].c = M.r[2].m128_f32[3] - M.r[2].m128_f32[2];
-    planes[5].d = M.r[3].m128_f32[3] - M.r[3].m128_f32[2];
+    return planes;
 }
 
+std::vector<DirectX::XMFLOAT3> ExtractCubePositions(const CNBufferData& mBuffers) {
+    std::vector<DirectX::XMFLOAT3> positions;
+    for (int i = 0; i < NUM_INSTANCES; ++i) {
+        DirectX::XMFLOAT4X4 modelMatrix;
+        DirectX::XMStoreFloat4x4(&modelMatrix, mBuffers.models[i]);
+        DirectX::XMFLOAT3 position = { modelMatrix._41, modelMatrix._42, modelMatrix._43 };
+        positions.push_back(position);
+    }
+    return positions;
+}
+
+std::vector<AABB> CreateAABBs(const std::vector<DirectX::XMFLOAT3>& positions, float cubeSize) {
+    std::vector<AABB> aabbs;
+
+    float halfDiagonal = (cubeSize * std::sqrt(3.0f)) / 2.0f;
+
+    for (const auto& pos : positions) {
+        AABB aabb;
+        aabb.min = { pos.x - halfDiagonal, pos.y - halfDiagonal, pos.z - halfDiagonal };
+        aabb.max = { pos.x + halfDiagonal, pos.y + halfDiagonal, pos.z + halfDiagonal };
+        aabbs.push_back(aabb);
+    }
+
+    return aabbs;
+}
+
+bool IsBoxInside(const std::array<FrustumPlane, 6>& frustum, const DirectX::XMFLOAT3& bbMin, const DirectX::XMFLOAT3& bbMax) {
+    for (const auto& plane : frustum) {
+        DirectX::XMFLOAT3 norm = { plane.a, plane.b, plane.c };
+        DirectX::XMFLOAT3 p(
+            signbit(norm.x) ? bbMin.x : bbMax.x,
+            signbit(norm.y) ? bbMin.y : bbMax.y,
+            signbit(norm.z) ? bbMin.z : bbMax.z
+        );
+
+        float distance = plane.a * p.x + plane.b * p.y + plane.c * p.z + plane.d;
+        if (distance < 0.0f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::vector<int> PerformFrustumCulling(const std::array<FrustumPlane, 6>& frustumPlanes,
+    const std::vector<AABB>& aabbs) {
+    std::vector<int> visibleIndices;
+    for (size_t i = 0; i < aabbs.size(); ++i) {
+        if (IsBoxInside(frustumPlanes, aabbs[i].min, aabbs[i].max)) {
+            visibleIndices.push_back(static_cast<int>(i));
+        }
+    }
+    return visibleIndices;
+}
+
+void SetCubesMatrices() {
+    for (int i = 0; i < NUM_INSTANCES; i++) {
+        float randomX = static_cast<float>(std::rand() % 50) / 10.0f - 5.0f;
+        float randomY = static_cast<float>(std::rand() % 50) / 10.0f - 5.0f;
+        float randomZ = static_cast<float>(std::rand() % 50) / 10.0f - 5.0f;
+
+        DirectX::XMMATRIX translationMatrix = DirectX::XMMatrixTranslation(randomX, randomY, randomZ);
+
+        g_mBuffers.isNormalMapActive[i] = DirectX::XMFLOAT4(i % 2, i % 2, i % 2, i % 2);
+        g_mBuffers.models[i] = translationMatrix;
+        g_mBuffers.normals[i] = DirectX::XMMatrixInverse(nullptr, g_mBuffers.models[i]);
+        g_mBuffers.normals[i] = DirectX::XMMatrixTranspose(g_mBuffers.normals[i]);
+    }
+}
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
@@ -508,18 +580,7 @@ HRESULT InitDirectX(HWND hWnd)
         }
     }
 
-    for (int i = 0; i < NUM_INSTANCES; i++) {
-        float randomX = static_cast<float>(std::rand() % 50) / 10.0f - 5.0f;
-        float randomY = static_cast<float>(std::rand() % 50) / 10.0f - 5.0f;
-        float randomZ = static_cast<float>(std::rand() % 50) / 10.0f - 5.0f;
-
-        DirectX::XMMATRIX translationMatrix = DirectX::XMMatrixTranslation(randomX, randomY, randomZ);
-
-        g_mBuffers.isNormalMapActive[i] = DirectX::XMFLOAT4(i % 2, i % 2, i % 2, i % 2);
-        g_mBuffers.models[i] = translationMatrix;
-        g_mBuffers.normals[i] = DirectX::XMMatrixInverse(nullptr, g_mBuffers.models[i]);
-        g_mBuffers.normals[i] = DirectX::XMMatrixTranspose(g_mBuffers.normals[i]);
-    }
+    SetCubesMatrices();
 
     if (FAILED(CreateShadersSkyBox()))
     {
@@ -1395,8 +1456,7 @@ void Render()
     g_pDeviceContext->PSSetShader(g_pPixelShader, nullptr, 0);
     g_pDeviceContext->PSSetConstantBuffers(0, 1, &g_pLightBuffer);
 
-    CNBufferData mBuffers; // rotating cubes
-//    CNBufferData mBuffers2; // static cubes
+    CNBufferData mBuffers;
     ConstantBufferData vpBuffer;
 
     for (int i = 0; i < NUM_INSTANCES; i++) {
@@ -1405,9 +1465,6 @@ void Render()
         g_mBuffers.normals[i] = DirectX::XMMatrixInverse(nullptr, g_mBuffers.models[i]);
         g_mBuffers.normals[i] = DirectX::XMMatrixTranspose(g_mBuffers.normals[i]);
     }
-    //mBuffers.models = DirectX::XMMatrixRotationY(g_RotationAngle);
-    //mBuffer.normal = DirectX::XMMatrixInverse(nullptr, mBuffer.model);
-    //mBuffer.normal = DirectX::XMMatrixTranspose(mBuffer.normal);
 
     DirectX::XMVECTOR eye = DirectX::XMVectorSet(
         g_CameraDistance * sin(g_RotationAngleY),
@@ -1420,12 +1477,28 @@ void Render()
     DirectX::XMVECTOR up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
     constexpr float fovAngleY = DirectX::XMConvertToRadians(60.0f);
-    vpBuffer.matrix = DirectX::XMMatrixMultiply(
-        DirectX::XMMatrixLookAtLH(eye, at, up),
-        DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f)
-    );
+    DirectX::XMMATRIX viewMatrix = DirectX::XMMatrixLookAtLH(eye, at, up);
+    DirectX::XMMATRIX projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f);
+    DirectX::XMMATRIX viewProjMatrix = DirectX::XMMatrixMultiply(viewMatrix, projectionMatrix);
+    vpBuffer.matrix = viewProjMatrix;
 
-    g_pDeviceContext->UpdateSubresource(g_pConstantBufferM, 0, nullptr, &g_mBuffers, 0, 0);
+    std::array<FrustumPlane, 6> frustumPlanes = ExtractFrustumPlanes(viewProjMatrix);
+
+    std::vector<DirectX::XMFLOAT3> cubePositions = ExtractCubePositions(g_mBuffers);
+    float cubeSize = 1.0f;
+    std::vector<AABB> cubeAABBs = CreateAABBs(cubePositions, cubeSize);
+
+    std::vector<int> visibleCubeIndices = PerformFrustumCulling(frustumPlanes, cubeAABBs);
+
+    CNBufferData visibleBuffers = {};
+    for (size_t i = 0; i < visibleCubeIndices.size(); ++i) {
+        int index = visibleCubeIndices[i];
+        visibleBuffers.models[i] = g_mBuffers.models[index];
+        visibleBuffers.normals[i] = g_mBuffers.normals[index];
+        visibleBuffers.isNormalMapActive[i] = g_mBuffers.isNormalMapActive[index];
+    }
+
+    g_pDeviceContext->UpdateSubresource(g_pConstantBufferM, 0, nullptr, &visibleBuffers, 0, 0);
     g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM);
 
     UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferVP, vpBuffer.matrix);
@@ -1438,16 +1511,11 @@ void Render()
 
     g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    g_pDeviceContext->DrawIndexedInstanced(36, NUM_INSTANCES, 0, 0, 0);
+    g_pDeviceContext->DrawIndexedInstanced(36, static_cast<UINT>(visibleCubeIndices.size()), 0, 0, 0);
 
-    //mBuffer2.model = DirectX::XMMatrixTranslation(3.0f, 0.0f, 0.0f);
-    //mBuffer2.normal = DirectX::XMMatrixInverse(nullptr, mBuffer2.model);
-    //mBuffer2.normal = DirectX::XMMatrixTranspose(mBuffer2.normal);
-    //g_pDeviceContext->UpdateSubresource(g_pConstantBufferM2, 0, nullptr, &mBuffer2, 0, 0);
-    //g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM2);
-
-    //g_pDeviceContext->DrawIndexed(36, 0, 0);
-
+    ImGui::Begin("Statistics");
+    ImGui::Text("Visible Cubes: %d", static_cast<int>(visibleCubeIndices.size()));
+    ImGui::End();
     RenderLightCube(g_lightPosition);
     //RenderPlanes();
 
