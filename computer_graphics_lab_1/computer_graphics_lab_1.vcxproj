@@ -118,6 +118,8 @@
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)VertexShader.hlsl" "$(TargetDir)" /E /I /Y 
 xcopy "$(ProjectDir)PixelShader.hlsl" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)VertexShaderPostProcess.hlsl" "$(TargetDir)" /E /I /Y 
+xcopy "$(ProjectDir)PixelShaderPostProcess.hlsl" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)PointLightPixelShader.hlsl" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)SkyBoxVertexShader.hlsl" "$(TargetDir)" /E /I /Y 
 xcopy "$(ProjectDir)SkyBoxPixelShader.hlsl" "$(TargetDir)" /E /I /Y
@@ -128,6 +130,9 @@ xcopy "$(ProjectDir)material.dds" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)materialNM.dds" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)cubemap.dds" "$(TargetDir)" /E /I /Y</Command>
     </PostBuildEvent>
+    <FxCompile>
+      <ShaderModel>5.0</ShaderModel>
+    </FxCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -147,6 +152,8 @@ xcopy "$(ProjectDir)cubemap.dds" "$(TargetDir)" /E /I /Y</Command>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)VertexShader.hlsl" "$(TargetDir)" /E /I /Y 
 xcopy "$(ProjectDir)PixelShader.hlsl" "$(TargetDir)" /E /I /Y
+xcopy "$(ProjectDir)VertexShaderPostProcess.hlsl" "$(TargetDir)" /E /I /Y 
+xcopy "$(ProjectDir)PixelShaderPostProcess.hlsl" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)PointLightPixelShader.hlsl" "$(TargetDir)" /E /I /Y
 xcopy "$(ProjectDir)SkyBoxVertexShader.hlsl" "$(TargetDir)" /E /I /Y 
 xcopy "$(ProjectDir)SkyBoxPixelShader.hlsl" "$(TargetDir)" /E /I /Y
@@ -159,6 +166,7 @@ xcopy "$(ProjectDir)cubemap.dds" "$(TargetDir)" /E /I /Y</Command>
     </PostBuildEvent>
     <FxCompile>
       <ObjectFileOutput />
+      <ShaderModel>5.0</ShaderModel>
     </FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -200,6 +208,17 @@ xcopy "$(ProjectDir)cubemap.dds" "$(TargetDir)" /E /I /Y</Command>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
       <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">PSMain</EntryPointName>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
+      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">PSMain</EntryPointName>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
+    </FxCompile>
+    <FxCompile Include="PixelShaderPostProcess.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
+      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">PSMain</EntryPointName>
       <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">PSMain</EntryPointName>
     </FxCompile>
     <FxCompile Include="PlanePixelShader.hlsl">
@@ -260,6 +279,16 @@ xcopy "$(ProjectDir)cubemap.dds" "$(TargetDir)" /E /I /Y</Command>
       <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">VSMain</EntryPointName>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
       <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">VSMain</EntryPointName>
+    </FxCompile>
+    <FxCompile Include="VertexShaderPostProcess.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Vertex</ShaderType>
+      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">VSMain</EntryPointName>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
+      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">VSMain</EntryPointName>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">5.0</ShaderModel>
     </FxCompile>
   </ItemGroup>
   <ItemGroup>

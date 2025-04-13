@@ -83,6 +83,15 @@ ID3D11ShaderResourceView* g_pNormalMapSRV = nullptr;
 ID3D11Buffer* g_pLightVertexBuffer = nullptr;
 ID3D11Buffer* g_pLightIndexBuffer = nullptr;
 
+bool g_EnablePostProcessing = false;
+ID3D11Texture2D* g_pPostProcessingTexture = nullptr;
+ID3D11RenderTargetView* g_pPostProcessingRTV = nullptr;
+ID3D11ShaderResourceView* g_pPostProcessingSRV = nullptr;
+ID3D11VertexShader* g_pPostProcessingVS = nullptr;
+ID3D11PixelShader* g_pPostProcessingPS = nullptr;
+ID3D11Buffer* g_pPostprocessingVertexBuffer = nullptr;
+ID3D11InputLayout* g_pPostProcessingLayout = nullptr;
+
 DirectX::XMFLOAT3 g_CameraPosition = { 0.0f, 0.0f, -5.0f };
 float g_RotationAngle = 0.0f;
 float g_RotationAngleX = 0.0f;
@@ -142,6 +151,11 @@ struct VertexPlane {
 
 struct FrustumPlane {
     float a, b, c, d;
+};
+
+struct FullScreenVertex {
+    DirectX::XMFLOAT3 position;
+    DirectX::XMFLOAT2 texCoord;
 };
 
 struct alignas(16) LightBuffer {
@@ -259,6 +273,12 @@ UINT planeIndices[] = {
     0, 2, 3
 };
 
+FullScreenVertex FullScreenVertices[] = {
+        { {-1.0f, -1.0f, 0.0f}, {1.0f, 1.0f} },
+        { {-1.0f,  1.0f, 0.0f}, {3.0f, 1.0f} },
+        { { 1.0f, -1.0f, 0.0f}, {-1.0f, -3.0f} }
+};
+
 DirectX::XMFLOAT4 g_ColorBuffers[2] = { DirectX::XMFLOAT4(1.0f, 0.0f, 0.0f, 0.5f), 
                                   DirectX::XMFLOAT4(0.0f, 0.0f, 1.0f, 0.5f) }; 
 
@@ -297,6 +317,9 @@ HRESULT CreateBlendState();
 HRESULT CreateRasterizerState();
 HRESULT CreateLightConstantBuffers();
 HRESULT CreateShadersLight();
+HRESULT CreateShadersPostProcess();
+HRESULT CreatePostProcessingBuffers();
+HRESULT CreatePostProcessingResources(UINT screenWidth, UINT screenHeight);
 
 std::array<FrustumPlane, 6> ExtractFrustumPlanes(const DirectX::XMMATRIX& viewProjMatrix) {
     std::array<FrustumPlane, 6> planes;
@@ -529,6 +552,18 @@ HRESULT InitDirectX(HWND hWnd)
     viewport.TopLeftY = 0;
     g_pDeviceContext->RSSetViewports(1, &viewport);
 
+    if (FAILED(CreatePostProcessingResources(800, 600)))
+    {
+        MessageBox(hWnd, L"Failed to create post processing resources.", L"Error", MB_OK);
+        return hr;
+    }
+
+    if (FAILED(CreatePostProcessingBuffers()))
+    {
+        MessageBox(hWnd, L"Failed to create post processing vertex buffer.", L"Error", MB_OK);
+        return hr;
+    }
+
     //Инициализация ImGui
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -536,6 +571,12 @@ HRESULT InitDirectX(HWND hWnd)
     ImGui::StyleColorsDark();
     ImGui_ImplWin32_Init(hWnd);
     ImGui_ImplDX11_Init(g_pDevice, g_pDeviceContext);
+
+    if (FAILED(CreateShadersPostProcess()))
+    {
+        MessageBox(hWnd, L"Failed to create Post Processing shaders.", L"Error", MB_OK);
+        return hr;
+    }
 
     if(FAILED(CreateShadersLight()))
     {
@@ -699,6 +740,45 @@ HRESULT LoadSkybox(const wchar_t* filename)
     return hr; // Возвращаем статус успеха
 }
 
+HRESULT CreatePostProcessingResources(UINT screenWidth, UINT screenHeight)
+{
+    HRESULT hr = S_OK;
+
+    D3D11_TEXTURE2D_DESC textureDesc = {};
+    textureDesc.Width = screenWidth;
+    textureDesc.Height = screenHeight;
+    textureDesc.MipLevels = 1;
+    textureDesc.ArraySize = 1;
+    textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    textureDesc.SampleDesc.Count = 1;
+    textureDesc.SampleDesc.Quality = 0;
+    textureDesc.MiscFlags = 0;
+    textureDesc.Usage = D3D11_USAGE_DEFAULT;
+    textureDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+    hr = g_pDevice->CreateTexture2D(&textureDesc, nullptr, &g_pPostProcessingTexture);
+    if (FAILED(hr)) {
+        MessageBox(nullptr, L"Failed to create post-processing texture.", L"Error", MB_OK | MB_ICONERROR);
+        return hr;
+    }
+    hr = g_pDevice->CreateRenderTargetView(g_pPostProcessingTexture, nullptr, &g_pPostProcessingRTV);
+    if (FAILED(hr)) {
+        MessageBox(nullptr, L"Failed to create render target view for post-processing.", L"Error", MB_OK | MB_ICONERROR);
+        if (g_pPostProcessingTexture) g_pPostProcessingTexture->Release();
+        return hr;
+    }
+
+    hr = g_pDevice->CreateShaderResourceView(g_pPostProcessingTexture, nullptr, &g_pPostProcessingSRV);
+    if (FAILED(hr)) {
+        MessageBox(nullptr, L"Failed to create shader resource view for post-processing.", L"Error", MB_OK | MB_ICONERROR);
+        if (g_pPostProcessingTexture) g_pPostProcessingTexture->Release();
+        if (g_pPostProcessingRTV) g_pPostProcessingRTV->Release();
+        return hr;
+    }
+
+    return S_OK;
+}
+
 HRESULT CreateSampler() {
     D3D11_SAMPLER_DESC samplerDesc = {};
     samplerDesc.Filter = D3D11_FILTER_ANISOTROPIC;
@@ -762,6 +842,13 @@ void CleanupDirectX()
     if (g_pLightColorBuffer) g_pLightColorBuffer->Release();
     if (g_pLightPixelShader) g_pLightPixelShader->Release();
 
+    if (g_pPostProcessingLayout) g_pPostProcessingLayout->Release();
+    if (g_pPostprocessingVertexBuffer) g_pPostprocessingVertexBuffer->Release();
+    if (g_pPostProcessingPS) g_pPostProcessingPS->Release();
+    if (g_pPostProcessingVS) g_pPostProcessingVS->Release();
+    if (g_pPostProcessingTexture) g_pPostProcessingTexture->Release();
+    if (g_pPostProcessingSRV) g_pPostProcessingSRV->Release();
+    if (g_pPostProcessingRTV) g_pPostProcessingRTV->Release();
     if (g_pRenderTargetView) g_pRenderTargetView->Release();
     if (g_pSwapChain) g_pSwapChain->Release();
     if (g_pDeviceContext) g_pDeviceContext->Release();
@@ -899,6 +986,39 @@ HRESULT CreateShadersPlane() {
 
     hr = g_pDevice->CreatePixelShader(pPSBlobPlane->GetBufferPointer(), pPSBlobPlane->GetBufferSize(), nullptr, &g_pPlanePixelShader);
     pPSBlobPlane->Release();
+
+    if (FAILED(hr)) return hr;
+
+    return S_OK;
+}
+
+HRESULT CreateShadersPostProcess()
+{
+    HRESULT hr = S_OK;
+
+    ID3DBlob* pVSBlobPP = nullptr;
+    hr = CompileShader(L"VertexShaderPostProcess.hlsl", "VSMain", "vs_5_0", &pVSBlobPP);
+    if (FAILED(hr)) return hr;
+
+    hr = g_pDevice->CreateVertexShader(pVSBlobPP->GetBufferPointer(), pVSBlobPP->GetBufferSize(), nullptr, &g_pPostProcessingVS);
+    if (FAILED(hr)) return hr;
+
+    D3D11_INPUT_ELEMENT_DESC PostProcessingLayout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+    };
+
+    hr = g_pDevice->CreateInputLayout(PostProcessingLayout,
+        ARRAYSIZE(PostProcessingLayout), pVSBlobPP->GetBufferPointer(), pVSBlobPP->GetBufferSize(), &g_pPostProcessingLayout);
+    pVSBlobPP->Release();
+    if (FAILED(hr)) return hr;
+
+    ID3DBlob* pPSBlobPP = nullptr;
+    hr = CompileShader(L"PixelShaderPostProcess.hlsl", "PSMain", "ps_5_0", &pPSBlobPP);
+    if (FAILED(hr)) return hr;
+
+    hr = g_pDevice->CreatePixelShader(pPSBlobPP->GetBufferPointer(), pPSBlobPP->GetBufferSize(), nullptr, &g_pPostProcessingPS);
+    pPSBlobPP->Release();
 
     if (FAILED(hr)) return hr;
 
@@ -1119,6 +1239,25 @@ HRESULT CreateBuffersPlane() {
     return S_OK;
 }
 
+HRESULT CreatePostProcessingBuffers()
+{
+    HRESULT hr = S_OK;
+
+    D3D11_BUFFER_DESC bufferDescPP = {};
+    bufferDescPP.Usage = D3D11_USAGE_DEFAULT;
+    bufferDescPP.ByteWidth = sizeof(FullScreenVertices);
+    bufferDescPP.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    bufferDescPP.CPUAccessFlags = 0;
+
+    D3D11_SUBRESOURCE_DATA initData = {};
+    initData.pSysMem = FullScreenVertices;
+
+    hr = g_pDevice->CreateBuffer(&bufferDescPP, &initData, &g_pPostprocessingVertexBuffer);
+    if (FAILED(hr)) return hr;
+
+    return S_OK;
+}
+
 HRESULT CreateDepthStencilBuffer() {
     D3D11_TEXTURE2D_DESC depthDesc = {};
     depthDesc.Width = 800;  
@@ -1287,92 +1426,92 @@ void RenderSkyBox()
     g_pDeviceContext->Draw(36, 0);
 }
 
-//void RenderPlanes() {
-//    g_pDeviceContext->OMSetBlendState(g_pBlendState, nullptr, 0xffffffff);
-//    g_pDeviceContext->OMSetDepthStencilState(g_pDepthStencilStateForTransparent, 1);
-//    g_pDeviceContext->RSSetState(g_pRasterizerState);
-//    UINT stride = sizeof(VertexPlane);
-//    UINT offset = 0;
-//    g_pDeviceContext->IASetVertexBuffers(0, 1, &g_pPlaneVertexBuffer, &stride, &offset);
-//    g_pDeviceContext->IASetIndexBuffer(g_pPlaneIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
-//    g_pDeviceContext->IASetInputLayout(g_pPlaneInputLayout);
-//    g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-//
-//    g_pDeviceContext->VSSetShader(g_pPlaneVertexShader, nullptr, 0);
-//    g_pDeviceContext->PSSetShader(g_pPlanePixelShader, nullptr, 0);
-//
-//    struct TransparentObject
-//    {
-//        DirectX::XMMATRIX modelMatrix;
-//        DirectX::XMFLOAT4 color;
-//        float distanceToCamera;
-//    };
-//
-//    std::vector<TransparentObject> transparentObjects;
-//
-//    DirectX::XMVECTOR cameraPosition = DirectX::XMVectorSet(
-//        g_CameraPosition.x, g_CameraPosition.y, g_CameraPosition.z, 1.0f
-//    );
-//
-//    for (int i = 0; i < 2; ++i)
-//    {
-//        DirectX::XMVECTOR objPos = DirectX::XMVector3Transform(
-//            DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),
-//            g_modelMatrices[i]
-//        );
-//
-//        DirectX::XMVECTOR diff = DirectX::XMVectorSubtract(objPos, cameraPosition);
-//        float distance = DirectX::XMVectorGetX(DirectX::XMVector3Length(diff));
-//
-//        transparentObjects.push_back({ g_modelMatrices[i], g_ColorBuffers[i], distance});
-//    }
-//
-//    std::sort(transparentObjects.begin(), transparentObjects.end(),
-//        [](const TransparentObject& a, const TransparentObject& b)
-//        {
-//            return a.distanceToCamera > b.distanceToCamera;
-//        });
-//
-//    for (const auto& obj : transparentObjects)
-//    {
-//        CNBufferData mBufferPlane;
-//        ConstantBufferData vpBufferPlane;
-//        ColorBuffer colbuf;
-//        colbuf.color = obj.color;
-//        DirectX::XMVECTOR eye = DirectX::XMVectorSet(
-//            g_CameraDistance * sin(g_RotationAngleY),
-//            g_CameraDistance * sin(g_RotationAngleX),
-//            g_CameraDistance * cos(g_RotationAngleY),
-//            1.0f
-//        );
-//
-//        DirectX::XMVECTOR at = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
-//        DirectX::XMVECTOR up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-//
-//        constexpr float fovAngleY = DirectX::XMConvertToRadians(60.0f);
-//        vpBufferPlane.matrix = DirectX::XMMatrixMultiply(
-//            DirectX::XMMatrixLookAtLH(eye, at, up),
-//            DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f)
-//        );
-//
-//        mBufferPlane.model = obj.modelMatrix;
-//        DirectX::XMMATRIX normalMatrix = DirectX::XMMatrixInverse(nullptr, obj.modelMatrix);
-//        normalMatrix = DirectX::XMMatrixTranspose(normalMatrix);
-//        mBufferPlane.normal = normalMatrix;
-//        g_pDeviceContext->UpdateSubresource(g_pConstantBufferMPlane, 0, nullptr, &mBufferPlane, 0, 0);
-//        g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferMPlane);
-//
-//        UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferVPPlane, vpBufferPlane.matrix);
-//        g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVPPlane);
-//
-//        g_pDeviceContext->UpdateSubresource(g_pConstantColorBuffer, 0, nullptr, &colbuf, 0, 0);
-//        g_pDeviceContext->VSSetConstantBuffers(2, 1, &g_pConstantColorBuffer);
-//        g_pDeviceContext->DrawIndexed(6, 0, 0);
-//    }
-//
-//    g_pDeviceContext->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
-//    g_pDeviceContext->OMSetDepthStencilState(nullptr, 0);
-//}
+void RenderPlanes() {
+    g_pDeviceContext->OMSetBlendState(g_pBlendState, nullptr, 0xffffffff);
+    g_pDeviceContext->OMSetDepthStencilState(g_pDepthStencilStateForTransparent, 1);
+    g_pDeviceContext->RSSetState(g_pRasterizerState);
+    UINT stride = sizeof(VertexPlane);
+    UINT offset = 0;
+    g_pDeviceContext->IASetVertexBuffers(0, 1, &g_pPlaneVertexBuffer, &stride, &offset);
+    g_pDeviceContext->IASetIndexBuffer(g_pPlaneIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
+    g_pDeviceContext->IASetInputLayout(g_pPlaneInputLayout);
+    g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    g_pDeviceContext->VSSetShader(g_pPlaneVertexShader, nullptr, 0);
+    g_pDeviceContext->PSSetShader(g_pPlanePixelShader, nullptr, 0);
+
+    struct TransparentObject
+    {
+        DirectX::XMMATRIX modelMatrix;
+        DirectX::XMFLOAT4 color;
+        float distanceToCamera;
+    };
+
+    std::vector<TransparentObject> transparentObjects;
+
+    DirectX::XMVECTOR cameraPosition = DirectX::XMVectorSet(
+        g_CameraPosition.x, g_CameraPosition.y, g_CameraPosition.z, 1.0f
+    );
+
+    for (int i = 0; i < 2; ++i)
+    {
+        DirectX::XMVECTOR objPos = DirectX::XMVector3Transform(
+            DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),
+            g_modelMatrices[i]
+        );
+
+        DirectX::XMVECTOR diff = DirectX::XMVectorSubtract(objPos, cameraPosition);
+        float distance = DirectX::XMVectorGetX(DirectX::XMVector3Length(diff));
+
+        transparentObjects.push_back({ g_modelMatrices[i], g_ColorBuffers[i], distance});
+    }
+
+    std::sort(transparentObjects.begin(), transparentObjects.end(),
+        [](const TransparentObject& a, const TransparentObject& b)
+        {
+            return a.distanceToCamera > b.distanceToCamera;
+        });
+
+    for (const auto& obj : transparentObjects)
+    {
+        CNBufferData mBufferPlane;
+        ConstantBufferData vpBufferPlane;
+        ColorBuffer colbuf;
+        colbuf.color = obj.color;
+        DirectX::XMVECTOR eye = DirectX::XMVectorSet(
+            g_CameraDistance * sin(g_RotationAngleY),
+            g_CameraDistance * sin(g_RotationAngleX),
+            g_CameraDistance * cos(g_RotationAngleY),
+            1.0f
+        );
+
+        DirectX::XMVECTOR at = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
+        DirectX::XMVECTOR up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+
+        constexpr float fovAngleY = DirectX::XMConvertToRadians(60.0f);
+        vpBufferPlane.matrix = DirectX::XMMatrixMultiply(
+            DirectX::XMMatrixLookAtLH(eye, at, up),
+            DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f)
+        );
+
+        mBufferPlane.models[0] = obj.modelMatrix;
+        DirectX::XMMATRIX normalMatrix = DirectX::XMMatrixInverse(nullptr, obj.modelMatrix);
+        normalMatrix = DirectX::XMMatrixTranspose(normalMatrix);
+        mBufferPlane.normals[0] = normalMatrix;
+        g_pDeviceContext->UpdateSubresource(g_pConstantBufferMPlane, 0, nullptr, &mBufferPlane, 0, 0);
+        g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferMPlane);
+
+        UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferVPPlane, vpBufferPlane.matrix);
+        g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVPPlane);
+
+        g_pDeviceContext->UpdateSubresource(g_pConstantColorBuffer, 0, nullptr, &colbuf, 0, 0);
+        g_pDeviceContext->VSSetConstantBuffers(2, 1, &g_pConstantColorBuffer);
+        g_pDeviceContext->DrawIndexed(6, 0, 0);
+    }
+
+    g_pDeviceContext->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
+    g_pDeviceContext->OMSetDepthStencilState(nullptr, 0);
+}
 
 void RenderLightCube(DirectX::XMFLOAT3 lightPosition)
 {
@@ -1421,15 +1560,24 @@ void Render()
         g_RotationAngle -= DirectX::XM_2PI;
     }
 
-    g_pDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
-    g_pDeviceContext->ClearRenderTargetView(g_pRenderTargetView, DirectX::Colors::MidnightBlue);
+    if (g_EnablePostProcessing)
+    {
+        g_pDeviceContext->OMSetRenderTargets(1, &g_pPostProcessingRTV, g_pDepthStencilView);
+    }
+    else
+    {
+        g_pDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
+    }
+
+    ID3D11RenderTargetView* currentRTV = g_EnablePostProcessing ? g_pPostProcessingRTV : g_pRenderTargetView;
+    g_pDeviceContext->ClearRenderTargetView(currentRTV, DirectX::Colors::MidnightBlue);
     g_pDeviceContext->ClearDepthStencilView(g_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    ImGui::SetNextWindowSize(ImVec2(300, 125));
+    ImGui::SetNextWindowSize(ImVec2(300, 200));
     ImGui::SetNextWindowPos(ImVec2(0, 0));
 
     ImGui::Begin("Light Controls");
@@ -1440,6 +1588,7 @@ void Render()
 
     ImGui::ColorEdit3("Light Color", reinterpret_cast<float*>(&lightColor));
 
+    ImGui::Checkbox("Enable Post Processing", &g_EnablePostProcessing);
     ImGui::End();
 
     RenderSkyBox();
@@ -1517,7 +1666,26 @@ void Render()
     ImGui::Text("Visible Cubes: %d", static_cast<int>(visibleCubeIndices.size()));
     ImGui::End();
     RenderLightCube(g_lightPosition);
-    //RenderPlanes();
+    RenderPlanes();
+
+    if (g_EnablePostProcessing && g_pPostProcessingRTV && g_pPostProcessingSRV) {
+        g_pDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
+        g_pDeviceContext->IASetInputLayout(g_pPostProcessingLayout);
+        g_pDeviceContext->VSSetShader(g_pPostProcessingVS, nullptr, 0);
+        g_pDeviceContext->PSSetShader(g_pPostProcessingPS, nullptr, 0);
+
+        UINT postProcessStride = sizeof(FullScreenVertex);
+        UINT postProcessOffset = 0;
+        g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        g_pDeviceContext->PSSetShaderResources(0, 1, &g_pPostProcessingSRV);
+        g_pDeviceContext->Draw(3, 0);
+
+        ID3D11ShaderResourceView* nullSRV = nullptr;
+        g_pDeviceContext->PSSetShaderResources(0, 1, &nullSRV);
+    }
+    else {
+        g_pDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
+    }
 
     ImGui::Render();
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
@@ -1585,21 +1753,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 HRESULT ResizeBuffers(UINT width, UINT height, HWND hWnd)
 {
     HRESULT hr = S_OK;
-    if (g_pRenderTargetView) {
-        g_pDeviceContext->OMSetRenderTargets(0, nullptr, nullptr);
-        g_pRenderTargetView->Release();
-        g_pRenderTargetView = nullptr;
-    }
 
-    if (g_pDepthStencilView) {
-        g_pDepthStencilView->Release();
-        g_pDepthStencilView = nullptr;
-    }
-
-    if (g_pDepthStencilBuffer) {
-        g_pDepthStencilBuffer->Release();
-        g_pDepthStencilBuffer = nullptr;
-    }
+    ID3D11DeviceContext* currentContext = g_pDeviceContext;
+    currentContext->OMSetRenderTargets(0, nullptr, nullptr);
+    g_pRenderTargetView->Release();
+    g_pDepthStencilView->Release();
+    g_pDepthStencilBuffer->Release();
+    g_pPostProcessingRTV->Release();
+    g_pPostProcessingSRV->Release();
+    g_pPostProcessingTexture->Release();
 
     g_pSwapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
 
@@ -1644,6 +1806,12 @@ HRESULT ResizeBuffers(UINT width, UINT height, HWND hWnd)
     }
 
     g_pDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
+
+    if (FAILED(CreatePostProcessingResources(width, height)))
+    {
+        MessageBox(hWnd, L"Failed to create post processing resources.", L"Error", MB_OK);
+        return hr;
+    }
     RECT rc;
     GetClientRect(hWnd, &rc);
     D3D11_VIEWPORT vp = {};
