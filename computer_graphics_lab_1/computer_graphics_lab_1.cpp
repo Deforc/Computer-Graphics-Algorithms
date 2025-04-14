@@ -7,7 +7,14 @@
 #include <DirectXColors.h>
 #include <DirectXTex.h>
 #include <DDSTextureLoader.h>
+#include <array>
+#include <cmath>
 #include <algorithm>
+#include <cstdlib>
+#include <ctime>
+#include <imgui/imgui.h>
+#include <imgui/backends/imgui_impl_win32.h>
+#include <imgui/backends/imgui_impl_dx11.h>
 #ifdef _DEBUG
 #include <dxgidebug.h>
 #endif
@@ -16,7 +23,12 @@
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "dxguid.lib")
 
+extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
 #define MAX_LOADSTRING 100
+
+const int NUM_INSTANCES = 10;
+const int NUM_TEX = 2;
 
 HINSTANCE hInst;
 WCHAR szTitle[MAX_LOADSTRING];
@@ -36,6 +48,7 @@ ID3D11InputLayout* g_pInputLayout = nullptr;
 ID3D11VertexShader* g_pVertexShader = nullptr;
 ID3D11PixelShader* g_pPixelShader = nullptr;
 ID3D11ShaderResourceView* g_pTextureView = nullptr;
+ID3D11ShaderResourceView* g_pTextureView_naggets = nullptr;
 ID3D11SamplerState* g_pSamplerState = nullptr;
 
 ID3D11InputLayout* g_pSkyboxInputLayout = nullptr;
@@ -70,6 +83,15 @@ ID3D11ShaderResourceView* g_pNormalMapSRV = nullptr;
 ID3D11Buffer* g_pLightVertexBuffer = nullptr;
 ID3D11Buffer* g_pLightIndexBuffer = nullptr;
 
+bool g_EnablePostProcessing = false;
+ID3D11Texture2D* g_pPostProcessingTexture = nullptr;
+ID3D11RenderTargetView* g_pPostProcessingRTV = nullptr;
+ID3D11ShaderResourceView* g_pPostProcessingSRV = nullptr;
+ID3D11VertexShader* g_pPostProcessingVS = nullptr;
+ID3D11PixelShader* g_pPostProcessingPS = nullptr;
+ID3D11Buffer* g_pPostprocessingVertexBuffer = nullptr;
+ID3D11InputLayout* g_pPostProcessingLayout = nullptr;
+
 DirectX::XMFLOAT3 g_CameraPosition = { 0.0f, 0.0f, -5.0f };
 float g_RotationAngle = 0.0f;
 float g_RotationAngleX = 0.0f;
@@ -79,6 +101,7 @@ float g_CameraDistance = 5.0f;
 ULONGLONG g_timeStart = 0;
 float g_DeltaTime = 0.0f;
 
+DirectX::XMFLOAT3 g_lightPosition = { 2.5f, 0.6f, 0.0f };
 DirectX::XMFLOAT3 lightColor = DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f); 
 DirectX::XMFLOAT3 ambient = DirectX::XMFLOAT3(0.1f, 0.1f, 0.1f); 
 
@@ -91,6 +114,11 @@ struct Vertex {
     DirectX::XMFLOAT2 texCoord;
 };
 
+struct AABB {
+    DirectX::XMFLOAT3 min;
+    DirectX::XMFLOAT3 max;
+};
+
 struct ConstantBufferData
 {
     DirectX::XMMATRIX matrix;
@@ -98,8 +126,9 @@ struct ConstantBufferData
 
 struct CNBufferData
 {
-    DirectX::XMMATRIX model;
-    DirectX::XMMATRIX normal;
+    DirectX::XMMATRIX models[NUM_INSTANCES];
+    DirectX::XMMATRIX normals[NUM_INSTANCES];
+    DirectX::XMFLOAT4 isNormalMapActive[NUM_INSTANCES];
 };
 
 struct ColorBuffer {
@@ -118,6 +147,15 @@ struct VertexSkybox {
 struct VertexPlane {
     DirectX::XMFLOAT3 position;
     DirectX::XMFLOAT3 normal;
+};
+
+struct FrustumPlane {
+    float a, b, c, d;
+};
+
+struct FullScreenVertex {
+    DirectX::XMFLOAT3 position;
+    DirectX::XMFLOAT2 texCoord;
 };
 
 struct alignas(16) LightBuffer {
@@ -235,11 +273,19 @@ UINT planeIndices[] = {
     0, 2, 3
 };
 
+FullScreenVertex FullScreenVertices[] = {
+        { {-1.0f, -1.0f, 0.0f}, {1.0f, 1.0f} },
+        { {-1.0f,  1.0f, 0.0f}, {3.0f, 1.0f} },
+        { { 1.0f, -1.0f, 0.0f}, {-1.0f, -3.0f} }
+};
+
 DirectX::XMFLOAT4 g_ColorBuffers[2] = { DirectX::XMFLOAT4(1.0f, 0.0f, 0.0f, 0.5f), 
                                   DirectX::XMFLOAT4(0.0f, 0.0f, 1.0f, 0.5f) }; 
 
 DirectX::XMMATRIX g_modelMatrices[2] = { DirectX::XMMatrixTranslation(1.0f, 0.0f, 0.0f),
                                        DirectX::XMMatrixTranslation(1.5f, 0.0f, 0.0f) };
+
+CNBufferData g_mBuffers;
 
 ATOM MyRegisterClass(HINSTANCE hInstance);
 BOOL InitInstance(HINSTANCE, int);
@@ -261,6 +307,7 @@ HRESULT CreateConstantBuffersPlane();
 HRESULT CreateConstantColorBuffer();
 void UpdateConstantBuffer(ID3D11DeviceContext* context, ID3D11Buffer* buffer, const DirectX::XMMATRIX& data);
 HRESULT LoadTexture(const wchar_t* filename);
+HRESULT LoadTexture_2(const wchar_t* filename);
 HRESULT LoadNormalMap(const wchar_t* filename);
 HRESULT CreateSampler();
 HRESULT LoadSkybox(const wchar_t* filename);
@@ -270,8 +317,108 @@ HRESULT CreateBlendState();
 HRESULT CreateRasterizerState();
 HRESULT CreateLightConstantBuffers();
 HRESULT CreateShadersLight();
+HRESULT CreateShadersPostProcess();
+HRESULT CreatePostProcessingBuffers();
+HRESULT CreatePostProcessingResources(UINT screenWidth, UINT screenHeight);
 
+std::array<FrustumPlane, 6> ExtractFrustumPlanes(const DirectX::XMMATRIX& viewProjMatrix) {
+    std::array<FrustumPlane, 6> planes;
 
+    DirectX::XMFLOAT4X4 matrix;
+    DirectX::XMStoreFloat4x4(&matrix, viewProjMatrix);
+
+    // Near plane
+    planes[0] = { matrix._13, matrix._23, matrix._33, matrix._43 };
+    // Far plane
+    planes[1] = { matrix._14 - matrix._13, matrix._24 - matrix._23, matrix._34 - matrix._33, matrix._44 - matrix._43 };
+    // Left plane
+    planes[2] = { matrix._14 + matrix._11, matrix._24 + matrix._21, matrix._34 + matrix._31, matrix._44 + matrix._41 };
+    // Right plane
+    planes[3] = { matrix._14 - matrix._11, matrix._24 - matrix._21, matrix._34 - matrix._31, matrix._44 - matrix._41 };
+    // Top plane
+    planes[4] = { matrix._14 - matrix._12, matrix._24 - matrix._22, matrix._34 - matrix._32, matrix._44 - matrix._42 };
+    // Bottom plane
+    planes[5] = { matrix._14 + matrix._12, matrix._24 + matrix._22, matrix._34 + matrix._32, matrix._44 + matrix._42 };
+
+    for (auto& plane : planes) {
+        float length = sqrt(plane.a * plane.a + plane.b * plane.b + plane.c * plane.c);
+        plane.a /= length;
+        plane.b /= length;
+        plane.c /= length;
+        plane.d /= length;
+    }
+
+    return planes;
+}
+
+std::vector<DirectX::XMFLOAT3> ExtractCubePositions(const CNBufferData& mBuffers) {
+    std::vector<DirectX::XMFLOAT3> positions;
+    for (int i = 0; i < NUM_INSTANCES; ++i) {
+        DirectX::XMFLOAT4X4 modelMatrix;
+        DirectX::XMStoreFloat4x4(&modelMatrix, mBuffers.models[i]);
+        DirectX::XMFLOAT3 position = { modelMatrix._41, modelMatrix._42, modelMatrix._43 };
+        positions.push_back(position);
+    }
+    return positions;
+}
+
+std::vector<AABB> CreateAABBs(const std::vector<DirectX::XMFLOAT3>& positions, float cubeSize) {
+    std::vector<AABB> aabbs;
+
+    float halfDiagonal = (cubeSize * std::sqrt(3.0f)) / 2.0f;
+
+    for (const auto& pos : positions) {
+        AABB aabb;
+        aabb.min = { pos.x - halfDiagonal, pos.y - halfDiagonal, pos.z - halfDiagonal };
+        aabb.max = { pos.x + halfDiagonal, pos.y + halfDiagonal, pos.z + halfDiagonal };
+        aabbs.push_back(aabb);
+    }
+
+    return aabbs;
+}
+
+bool IsBoxInside(const std::array<FrustumPlane, 6>& frustum, const DirectX::XMFLOAT3& bbMin, const DirectX::XMFLOAT3& bbMax) {
+    for (const auto& plane : frustum) {
+        DirectX::XMFLOAT3 norm = { plane.a, plane.b, plane.c };
+        DirectX::XMFLOAT3 p(
+            signbit(norm.x) ? bbMin.x : bbMax.x,
+            signbit(norm.y) ? bbMin.y : bbMax.y,
+            signbit(norm.z) ? bbMin.z : bbMax.z
+        );
+
+        float distance = plane.a * p.x + plane.b * p.y + plane.c * p.z + plane.d;
+        if (distance < 0.0f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::vector<int> PerformFrustumCulling(const std::array<FrustumPlane, 6>& frustumPlanes,
+    const std::vector<AABB>& aabbs) {
+    std::vector<int> visibleIndices;
+    for (size_t i = 0; i < aabbs.size(); ++i) {
+        if (IsBoxInside(frustumPlanes, aabbs[i].min, aabbs[i].max)) {
+            visibleIndices.push_back(static_cast<int>(i));
+        }
+    }
+    return visibleIndices;
+}
+
+void SetCubesMatrices() {
+    for (int i = 0; i < NUM_INSTANCES; i++) {
+        float randomX = static_cast<float>(std::rand() % 50) / 10.0f - 5.0f;
+        float randomY = static_cast<float>(std::rand() % 50) / 10.0f - 5.0f;
+        float randomZ = static_cast<float>(std::rand() % 50) / 10.0f - 5.0f;
+
+        DirectX::XMMATRIX translationMatrix = DirectX::XMMatrixTranslation(randomX, randomY, randomZ);
+
+        g_mBuffers.isNormalMapActive[i] = DirectX::XMFLOAT4(i % 2, i % 2, i % 2, i % 2);
+        g_mBuffers.models[i] = translationMatrix;
+        g_mBuffers.normals[i] = DirectX::XMMatrixInverse(nullptr, g_mBuffers.models[i]);
+        g_mBuffers.normals[i] = DirectX::XMMatrixTranspose(g_mBuffers.normals[i]);
+    }
+}
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
@@ -317,7 +464,8 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 }
 
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
-{
+{   
+    std::srand(static_cast<unsigned int>(std::time(nullptr)));
     hInst = hInstance;
     RECT rc = { 0, 0, 800, 600 };
     AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
@@ -404,6 +552,32 @@ HRESULT InitDirectX(HWND hWnd)
     viewport.TopLeftY = 0;
     g_pDeviceContext->RSSetViewports(1, &viewport);
 
+    if (FAILED(CreatePostProcessingResources(800, 600)))
+    {
+        MessageBox(hWnd, L"Failed to create post processing resources.", L"Error", MB_OK);
+        return hr;
+    }
+
+    if (FAILED(CreatePostProcessingBuffers()))
+    {
+        MessageBox(hWnd, L"Failed to create post processing vertex buffer.", L"Error", MB_OK);
+        return hr;
+    }
+
+    //Инициализация ImGui
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    ImGui::StyleColorsDark();
+    ImGui_ImplWin32_Init(hWnd);
+    ImGui_ImplDX11_Init(g_pDevice, g_pDeviceContext);
+
+    if (FAILED(CreateShadersPostProcess()))
+    {
+        MessageBox(hWnd, L"Failed to create Post Processing shaders.", L"Error", MB_OK);
+        return hr;
+    }
+
     if(FAILED(CreateShadersLight()))
     {
         MessageBox(hWnd, L"Failed to create light shaders.", L"Error", MB_OK);
@@ -447,6 +621,8 @@ HRESULT InitDirectX(HWND hWnd)
         }
     }
 
+    SetCubesMatrices();
+
     if (FAILED(CreateShadersSkyBox()))
     {
         MessageBox(hWnd, L"Failed to create shaders for skybox.", L"Error", MB_OK);
@@ -480,6 +656,11 @@ HRESULT InitDirectX(HWND hWnd)
 
     if (FAILED(CreateBuffersPlane())) {
         MessageBox(hWnd, L"Failed to create plane buffers.", L"Error", MB_OK);
+        return hr;
+    }
+
+    if (FAILED(LoadTexture_2(L"naggets2.dds"))) {
+        MessageBox(hWnd, L"Failed to load texture.", L"Error", MB_OK);
         return hr;
     }
 
@@ -517,6 +698,17 @@ HRESULT LoadTexture(const wchar_t* filename) {
     return hr;
 }
 
+HRESULT LoadTexture_2(const wchar_t* filename) {
+    DirectX::ScratchImage image;
+    HRESULT hr = DirectX::LoadFromDDSFile(filename, DirectX::DDS_FLAGS_NONE, nullptr, image);
+    if (FAILED(hr)) {
+        return hr;
+    }
+
+    hr = DirectX::CreateShaderResourceView(g_pDevice, image.GetImages(), image.GetImageCount(), image.GetMetadata(), &g_pTextureView_naggets);
+    return hr;
+}
+
 HRESULT LoadNormalMap(const wchar_t* filename) {
     DirectX::ScratchImage image;
     HRESULT hr = DirectX::LoadFromDDSFile(filename, DirectX::DDS_FLAGS_NONE, nullptr, image);
@@ -548,6 +740,45 @@ HRESULT LoadSkybox(const wchar_t* filename)
     return hr; // Возвращаем статус успеха
 }
 
+HRESULT CreatePostProcessingResources(UINT screenWidth, UINT screenHeight)
+{
+    HRESULT hr = S_OK;
+
+    D3D11_TEXTURE2D_DESC textureDesc = {};
+    textureDesc.Width = screenWidth;
+    textureDesc.Height = screenHeight;
+    textureDesc.MipLevels = 1;
+    textureDesc.ArraySize = 1;
+    textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    textureDesc.SampleDesc.Count = 1;
+    textureDesc.SampleDesc.Quality = 0;
+    textureDesc.MiscFlags = 0;
+    textureDesc.Usage = D3D11_USAGE_DEFAULT;
+    textureDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+    hr = g_pDevice->CreateTexture2D(&textureDesc, nullptr, &g_pPostProcessingTexture);
+    if (FAILED(hr)) {
+        MessageBox(nullptr, L"Failed to create post-processing texture.", L"Error", MB_OK | MB_ICONERROR);
+        return hr;
+    }
+    hr = g_pDevice->CreateRenderTargetView(g_pPostProcessingTexture, nullptr, &g_pPostProcessingRTV);
+    if (FAILED(hr)) {
+        MessageBox(nullptr, L"Failed to create render target view for post-processing.", L"Error", MB_OK | MB_ICONERROR);
+        if (g_pPostProcessingTexture) g_pPostProcessingTexture->Release();
+        return hr;
+    }
+
+    hr = g_pDevice->CreateShaderResourceView(g_pPostProcessingTexture, nullptr, &g_pPostProcessingSRV);
+    if (FAILED(hr)) {
+        MessageBox(nullptr, L"Failed to create shader resource view for post-processing.", L"Error", MB_OK | MB_ICONERROR);
+        if (g_pPostProcessingTexture) g_pPostProcessingTexture->Release();
+        if (g_pPostProcessingRTV) g_pPostProcessingRTV->Release();
+        return hr;
+    }
+
+    return S_OK;
+}
+
 HRESULT CreateSampler() {
     D3D11_SAMPLER_DESC samplerDesc = {};
     samplerDesc.Filter = D3D11_FILTER_ANISOTROPIC;
@@ -567,6 +798,10 @@ HRESULT CreateSampler() {
 
 void CleanupDirectX()
 {
+    ImGui_ImplDX11_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+
     if (g_pIndexBuffer) g_pIndexBuffer->Release();
     if (g_pConstantBufferM) g_pConstantBufferM->Release();
     if (g_pConstantBufferM2) g_pConstantBufferM2->Release();
@@ -592,7 +827,8 @@ void CleanupDirectX()
     if (g_pConstantBufferVPPlane) g_pConstantBufferVPPlane->Release();
     if (g_pConstantColorBuffer) g_pConstantColorBuffer->Release();
     if (g_pCubemapView) g_pCubemapView->Release();
-    if (g_pTextureView) g_pTextureView->Release();
+    if (g_pTextureView) g_pTextureView->Release(); 
+    if (g_pTextureView_naggets) g_pTextureView_naggets->Release();
     if (g_pNormalMapSRV) g_pNormalMapSRV->Release();
     if (g_pSamplerState) g_pSamplerState->Release();
     if (g_pDepthStencilBuffer) g_pDepthStencilBuffer->Release();
@@ -606,6 +842,13 @@ void CleanupDirectX()
     if (g_pLightColorBuffer) g_pLightColorBuffer->Release();
     if (g_pLightPixelShader) g_pLightPixelShader->Release();
 
+    if (g_pPostProcessingLayout) g_pPostProcessingLayout->Release();
+    if (g_pPostprocessingVertexBuffer) g_pPostprocessingVertexBuffer->Release();
+    if (g_pPostProcessingPS) g_pPostProcessingPS->Release();
+    if (g_pPostProcessingVS) g_pPostProcessingVS->Release();
+    if (g_pPostProcessingTexture) g_pPostProcessingTexture->Release();
+    if (g_pPostProcessingSRV) g_pPostProcessingSRV->Release();
+    if (g_pPostProcessingRTV) g_pPostProcessingRTV->Release();
     if (g_pRenderTargetView) g_pRenderTargetView->Release();
     if (g_pSwapChain) g_pSwapChain->Release();
     if (g_pDeviceContext) g_pDeviceContext->Release();
@@ -743,6 +986,39 @@ HRESULT CreateShadersPlane() {
 
     hr = g_pDevice->CreatePixelShader(pPSBlobPlane->GetBufferPointer(), pPSBlobPlane->GetBufferSize(), nullptr, &g_pPlanePixelShader);
     pPSBlobPlane->Release();
+
+    if (FAILED(hr)) return hr;
+
+    return S_OK;
+}
+
+HRESULT CreateShadersPostProcess()
+{
+    HRESULT hr = S_OK;
+
+    ID3DBlob* pVSBlobPP = nullptr;
+    hr = CompileShader(L"VertexShaderPostProcess.hlsl", "VSMain", "vs_5_0", &pVSBlobPP);
+    if (FAILED(hr)) return hr;
+
+    hr = g_pDevice->CreateVertexShader(pVSBlobPP->GetBufferPointer(), pVSBlobPP->GetBufferSize(), nullptr, &g_pPostProcessingVS);
+    if (FAILED(hr)) return hr;
+
+    D3D11_INPUT_ELEMENT_DESC PostProcessingLayout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+    };
+
+    hr = g_pDevice->CreateInputLayout(PostProcessingLayout,
+        ARRAYSIZE(PostProcessingLayout), pVSBlobPP->GetBufferPointer(), pVSBlobPP->GetBufferSize(), &g_pPostProcessingLayout);
+    pVSBlobPP->Release();
+    if (FAILED(hr)) return hr;
+
+    ID3DBlob* pPSBlobPP = nullptr;
+    hr = CompileShader(L"PixelShaderPostProcess.hlsl", "PSMain", "ps_5_0", &pPSBlobPP);
+    if (FAILED(hr)) return hr;
+
+    hr = g_pDevice->CreatePixelShader(pPSBlobPP->GetBufferPointer(), pPSBlobPP->GetBufferSize(), nullptr, &g_pPostProcessingPS);
+    pPSBlobPP->Release();
 
     if (FAILED(hr)) return hr;
 
@@ -958,6 +1234,25 @@ HRESULT CreateBuffersPlane() {
     initData.pSysMem = planeIndices;
 
     hr = g_pDevice->CreateBuffer(&bufferDescPlane, &initData, &g_pPlaneIndexBuffer);
+    if (FAILED(hr)) return hr;
+
+    return S_OK;
+}
+
+HRESULT CreatePostProcessingBuffers()
+{
+    HRESULT hr = S_OK;
+
+    D3D11_BUFFER_DESC bufferDescPP = {};
+    bufferDescPP.Usage = D3D11_USAGE_DEFAULT;
+    bufferDescPP.ByteWidth = sizeof(FullScreenVertices);
+    bufferDescPP.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    bufferDescPP.CPUAccessFlags = 0;
+
+    D3D11_SUBRESOURCE_DATA initData = {};
+    initData.pSysMem = FullScreenVertices;
+
+    hr = g_pDevice->CreateBuffer(&bufferDescPP, &initData, &g_pPostprocessingVertexBuffer);
     if (FAILED(hr)) return hr;
 
     return S_OK;
@@ -1199,10 +1494,10 @@ void RenderPlanes() {
             DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f)
         );
 
-        mBufferPlane.model = obj.modelMatrix;
+        mBufferPlane.models[0] = obj.modelMatrix;
         DirectX::XMMATRIX normalMatrix = DirectX::XMMatrixInverse(nullptr, obj.modelMatrix);
         normalMatrix = DirectX::XMMatrixTranspose(normalMatrix);
-        mBufferPlane.normal = normalMatrix;
+        mBufferPlane.normals[0] = normalMatrix;
         g_pDeviceContext->UpdateSubresource(g_pConstantBufferMPlane, 0, nullptr, &mBufferPlane, 0, 0);
         g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferMPlane);
 
@@ -1231,9 +1526,9 @@ void RenderLightCube(DirectX::XMFLOAT3 lightPosition)
     DirectX::XMMATRIX scale = DirectX::XMMatrixScaling(0.1f, 0.1f, 0.1f);
     DirectX::XMMATRIX translation = DirectX::XMMatrixTranslation(lightPosition.x, lightPosition.y, lightPosition.z);
     CNBufferData mBuffer3;
-    mBuffer3.model = scale * translation;
-    mBuffer3.normal = DirectX::XMMatrixInverse(nullptr, mBuffer3.model);
-    mBuffer3.normal = DirectX::XMMatrixTranspose(mBuffer3.normal);
+    mBuffer3.models[0] = scale * translation;
+    mBuffer3.normals[0] = DirectX::XMMatrixInverse(nullptr, mBuffer3.models[0]);
+    mBuffer3.normals[0] = DirectX::XMMatrixTranspose(mBuffer3.normals[0]);
     g_pDeviceContext->UpdateSubresource(g_pConstantBufferM3, 0, nullptr, &mBuffer3, 0, 0);
 
     g_pDeviceContext->IASetVertexBuffers(0, 1, &g_pVertexBuffer, &stride, &offset);
@@ -1246,7 +1541,7 @@ void RenderLightCube(DirectX::XMFLOAT3 lightPosition)
     g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM3);
     g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVP);
 
-    g_pDeviceContext->DrawIndexed(36, 0, 0);
+    g_pDeviceContext->DrawIndexedInstanced(36,1, 0, 0, 0);
 }
 
 void Render()
@@ -1265,9 +1560,36 @@ void Render()
         g_RotationAngle -= DirectX::XM_2PI;
     }
 
-    g_pDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
-    g_pDeviceContext->ClearRenderTargetView(g_pRenderTargetView, DirectX::Colors::MidnightBlue);
+    if (g_EnablePostProcessing)
+    {
+        g_pDeviceContext->OMSetRenderTargets(1, &g_pPostProcessingRTV, g_pDepthStencilView);
+    }
+    else
+    {
+        g_pDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
+    }
+
+    ID3D11RenderTargetView* currentRTV = g_EnablePostProcessing ? g_pPostProcessingRTV : g_pRenderTargetView;
+    g_pDeviceContext->ClearRenderTargetView(currentRTV, DirectX::Colors::MidnightBlue);
     g_pDeviceContext->ClearDepthStencilView(g_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+
+    ImGui_ImplDX11_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+
+    ImGui::SetNextWindowSize(ImVec2(300, 200));
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+
+    ImGui::Begin("Light Controls");
+
+    ImGui::SliderFloat("Light X", &g_lightPosition.x, -10.0f, 10.0f);
+    ImGui::SliderFloat("Light Y", &g_lightPosition.y, -10.0f, 10.0f);
+    ImGui::SliderFloat("Light Z", &g_lightPosition.z, -10.0f, 10.0f);
+
+    ImGui::ColorEdit3("Light Color", reinterpret_cast<float*>(&lightColor));
+
+    ImGui::Checkbox("Enable Post Processing", &g_EnablePostProcessing);
+    ImGui::End();
 
     RenderSkyBox();
 
@@ -1283,13 +1605,15 @@ void Render()
     g_pDeviceContext->PSSetShader(g_pPixelShader, nullptr, 0);
     g_pDeviceContext->PSSetConstantBuffers(0, 1, &g_pLightBuffer);
 
-    CNBufferData mBuffer;
-    CNBufferData mBuffer2;
+    CNBufferData mBuffers;
     ConstantBufferData vpBuffer;
 
-    mBuffer.model = DirectX::XMMatrixRotationY(g_RotationAngle);
-    mBuffer.normal = DirectX::XMMatrixInverse(nullptr, mBuffer.model);
-    mBuffer.normal = DirectX::XMMatrixTranspose(mBuffer.normal);
+    for (int i = 0; i < NUM_INSTANCES; i++) {
+        if(i % 2 != 0)
+        g_mBuffers.models[i] = DirectX::XMMatrixRotationY(g_RotationAngle / 1000.0f) * g_mBuffers.models[i];
+        g_mBuffers.normals[i] = DirectX::XMMatrixInverse(nullptr, g_mBuffers.models[i]);
+        g_mBuffers.normals[i] = DirectX::XMMatrixTranspose(g_mBuffers.normals[i]);
+    }
 
     DirectX::XMVECTOR eye = DirectX::XMVectorSet(
         g_CameraDistance * sin(g_RotationAngleY),
@@ -1302,43 +1626,78 @@ void Render()
     DirectX::XMVECTOR up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
     constexpr float fovAngleY = DirectX::XMConvertToRadians(60.0f);
-    vpBuffer.matrix = DirectX::XMMatrixMultiply(
-        DirectX::XMMatrixLookAtLH(eye, at, up),
-        DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f)
-    );
+    DirectX::XMMATRIX viewMatrix = DirectX::XMMatrixLookAtLH(eye, at, up);
+    DirectX::XMMATRIX projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(fovAngleY, 800.0f / 600.0f, 0.01f, 100.0f);
+    DirectX::XMMATRIX viewProjMatrix = DirectX::XMMatrixMultiply(viewMatrix, projectionMatrix);
+    vpBuffer.matrix = viewProjMatrix;
 
-    g_pDeviceContext->UpdateSubresource(g_pConstantBufferM, 0, nullptr, &mBuffer, 0, 0);
+    std::array<FrustumPlane, 6> frustumPlanes = ExtractFrustumPlanes(viewProjMatrix);
+
+    std::vector<DirectX::XMFLOAT3> cubePositions = ExtractCubePositions(g_mBuffers);
+    float cubeSize = 1.0f;
+    std::vector<AABB> cubeAABBs = CreateAABBs(cubePositions, cubeSize);
+
+    std::vector<int> visibleCubeIndices = PerformFrustumCulling(frustumPlanes, cubeAABBs);
+
+    CNBufferData visibleBuffers = {};
+    for (size_t i = 0; i < visibleCubeIndices.size(); ++i) {
+        int index = visibleCubeIndices[i];
+        visibleBuffers.models[i] = g_mBuffers.models[index];
+        visibleBuffers.normals[i] = g_mBuffers.normals[index];
+        visibleBuffers.isNormalMapActive[i] = g_mBuffers.isNormalMapActive[index];
+    }
+
+    g_pDeviceContext->UpdateSubresource(g_pConstantBufferM, 0, nullptr, &visibleBuffers, 0, 0);
     g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM);
 
     UpdateConstantBuffer(g_pDeviceContext, g_pConstantBufferVP, vpBuffer.matrix);
     g_pDeviceContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferVP);
 
     g_pDeviceContext->PSSetShaderResources(0, 1, &g_pTextureView);
+    g_pDeviceContext->PSSetShaderResources(2, 1, &g_pTextureView_naggets);
     g_pDeviceContext->PSSetShaderResources(1, 1, &g_pNormalMapSRV);
     g_pDeviceContext->PSSetSamplers(0, 1, &g_pSamplerState);
 
     g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    g_pDeviceContext->DrawIndexed(36, 0, 0);
+    g_pDeviceContext->DrawIndexedInstanced(36, static_cast<UINT>(visibleCubeIndices.size()), 0, 0, 0);
 
-    mBuffer2.model = DirectX::XMMatrixTranslation(3.0f, 0.0f, 0.0f);
-    mBuffer2.normal = DirectX::XMMatrixInverse(nullptr, mBuffer2.model);
-    mBuffer2.normal = DirectX::XMMatrixTranspose(mBuffer2.normal);
-    g_pDeviceContext->UpdateSubresource(g_pConstantBufferM2, 0, nullptr, &mBuffer2, 0, 0);
-    g_pDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferM2);
-
-    g_pDeviceContext->DrawIndexed(36, 0, 0);
-
-    DirectX::XMFLOAT3 lightPosition = DirectX::XMFLOAT3(4.0f, 0.0f, 0.0f);
-
-    RenderLightCube(DirectX::XMFLOAT3(2.3f, 0.55f, 0.0f));
+    ImGui::Begin("Statistics");
+    ImGui::Text("Visible Cubes: %d", static_cast<int>(visibleCubeIndices.size()));
+    ImGui::End();
+    RenderLightCube(g_lightPosition);
     RenderPlanes();
+
+    if (g_EnablePostProcessing && g_pPostProcessingRTV && g_pPostProcessingSRV) {
+        g_pDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
+        g_pDeviceContext->IASetInputLayout(g_pPostProcessingLayout);
+        g_pDeviceContext->VSSetShader(g_pPostProcessingVS, nullptr, 0);
+        g_pDeviceContext->PSSetShader(g_pPostProcessingPS, nullptr, 0);
+
+        UINT postProcessStride = sizeof(FullScreenVertex);
+        UINT postProcessOffset = 0;
+        g_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        g_pDeviceContext->PSSetShaderResources(0, 1, &g_pPostProcessingSRV);
+        g_pDeviceContext->Draw(3, 0);
+
+        ID3D11ShaderResourceView* nullSRV = nullptr;
+        g_pDeviceContext->PSSetShaderResources(0, 1, &nullSRV);
+    }
+    else {
+        g_pDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
+    }
+
+    ImGui::Render();
+    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
     g_pSwapChain->Present(1, 0);
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
+        return true;
+
     switch (message)
     {
     case WM_LBUTTONDOWN:
@@ -1353,7 +1712,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
 
     case WM_MOUSEMOVE:
-        if (g_MousePressed)
+        if (!ImGui::GetIO().WantCaptureMouse && g_MousePressed)
         {
             POINT newMousePos;
             GetCursorPos(&newMousePos);
@@ -1394,21 +1753,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 HRESULT ResizeBuffers(UINT width, UINT height, HWND hWnd)
 {
     HRESULT hr = S_OK;
-    if (g_pRenderTargetView) {
-        g_pDeviceContext->OMSetRenderTargets(0, nullptr, nullptr);
-        g_pRenderTargetView->Release();
-        g_pRenderTargetView = nullptr;
-    }
 
-    if (g_pDepthStencilView) {
-        g_pDepthStencilView->Release();
-        g_pDepthStencilView = nullptr;
-    }
-
-    if (g_pDepthStencilBuffer) {
-        g_pDepthStencilBuffer->Release();
-        g_pDepthStencilBuffer = nullptr;
-    }
+    ID3D11DeviceContext* currentContext = g_pDeviceContext;
+    currentContext->OMSetRenderTargets(0, nullptr, nullptr);
+    g_pRenderTargetView->Release();
+    g_pDepthStencilView->Release();
+    g_pDepthStencilBuffer->Release();
+    g_pPostProcessingRTV->Release();
+    g_pPostProcessingSRV->Release();
+    g_pPostProcessingTexture->Release();
 
     g_pSwapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
 
@@ -1453,6 +1806,12 @@ HRESULT ResizeBuffers(UINT width, UINT height, HWND hWnd)
     }
 
     g_pDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
+
+    if (FAILED(CreatePostProcessingResources(width, height)))
+    {
+        MessageBox(hWnd, L"Failed to create post processing resources.", L"Error", MB_OK);
+        return hr;
+    }
     RECT rc;
     GetClientRect(hWnd, &rc);
     D3D11_VIEWPORT vp = {};
